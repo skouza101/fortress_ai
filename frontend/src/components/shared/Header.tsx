@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { ShieldCheck, Menu, X } from "lucide-react";
+import { ShieldCheck, Menu, X, LogOut, User } from "lucide-react";
 import { useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 
 const NAV_LINKS = [
   { label: "Product", href: "/chat" },
@@ -12,6 +13,8 @@ const NAV_LINKS = [
 
 export default function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { data: session, status } = useSession();
+  const isAuthenticated = status === "authenticated";
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 h-16 border-b border-white/10 bg-background/80 backdrop-blur-2xl">
@@ -41,18 +44,40 @@ export default function Header() {
 
         {/* Desktop Auth */}
         <div className="hidden md:flex items-center gap-3">
-          <Link
-            href="/auth/login"
-            className="text-sm font-medium text-muted-foreground hover:text-secondary transition-colors px-4 py-2"
-          >
-            Sign In
-          </Link>
-          <Link
-            href="/auth/signup"
-            className="glass-button text-sm font-semibold px-5 py-2.5 rounded-xl"
-          >
-            Get Started
-          </Link>
+          {status === "loading" ? (
+            <div className="h-9 w-40 rounded-xl bg-white/5 border border-white/10 animate-pulse" aria-hidden="true" />
+          ) : isAuthenticated ? (
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10">
+                <User className="w-4 h-4 text-primary" />
+                <span className="text-xs font-medium text-secondary truncate max-w-[120px]">
+                  {session?.user?.email}
+                </span>
+              </div>
+              <button
+                onClick={() => signOut({ callbackUrl: "/" })}
+                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-red-400 transition-colors px-3 py-2"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <>
+              <Link
+                href="/auth/login"
+                className="text-sm font-medium text-muted-foreground hover:text-secondary transition-colors px-4 py-2"
+              >
+                Sign In
+              </Link>
+              <Link
+                href="/auth/signup"
+                className="glass-button text-sm font-semibold px-5 py-2.5 rounded-xl"
+              >
+                Get Started
+              </Link>
+            </>
+          )}
         </div>
 
         {/* Mobile Toggle */}
@@ -79,12 +104,29 @@ export default function Header() {
             </Link>
           ))}
           <div className="flex gap-3 pt-3 border-t border-white/10">
-            <Link href="/auth/login" className="flex-1 text-center text-sm font-medium text-muted-foreground py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors">
-              Sign In
-            </Link>
-            <Link href="/auth/signup" className="flex-1 text-center glass-button text-sm font-semibold py-2.5 rounded-xl">
-              Get Started
-            </Link>
+            {status === "loading" ? (
+              <div className="w-full h-10 rounded-xl bg-white/5 border border-white/10 animate-pulse" aria-hidden="true" />
+            ) : isAuthenticated ? (
+              <button
+                onClick={() => {
+                  setMobileOpen(false);
+                  signOut({ callbackUrl: "/" });
+                }}
+                className="flex-1 flex items-center justify-center gap-2 text-sm font-medium text-red-400 py-2.5 rounded-xl border border-red-400/20 hover:bg-red-400/10 transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </button>
+            ) : (
+              <>
+                <Link href="/auth/login" onClick={() => setMobileOpen(false)} className="flex-1 text-center text-sm font-medium text-muted-foreground py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors">
+                  Sign In
+                </Link>
+                <Link href="/auth/signup" onClick={() => setMobileOpen(false)} className="flex-1 text-center glass-button text-sm font-semibold py-2.5 rounded-xl">
+                  Get Started
+                </Link>
+              </>
+            )}
           </div>
         </div>
       )}

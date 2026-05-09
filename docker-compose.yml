@@ -13,36 +13,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: always
 
-  qwen-service:
-    image: vllm/vllm-openai-rocm:latest
-    container_name: qwen-3.6-27b
-    environment:
-      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
-      - VLLM_TARGET_DEVICE=rocm
-      - PYTORCH_ALLOC_CONF=expandable_segments:True
-    devices:
-      - "/dev/kfd:/dev/kfd"
-      - "/dev/dri:/dev/dri"
-    security_opt:
-      - seccomp:unconfined
-    group_add:
-      - "44"
-      - "992"
-    shm_size: '8gb'
-    cap_add:
-      - SYS_PTRACE
-    volumes:
-      - ~/.cache/huggingface:/root/.cache/huggingface
-    ports:
-      - "8001:8000"
-    ipc: host
-    command:
-      - "Qwen/Qwen3.6-27B"
-      - "--trust-remote-code"
-      - "--gpu-memory-utilization"
-      - "0.9"
-      - "--max-model-len"
-      - "131072"
 
   qdrant-db:
     image: qdrant/qdrant:latest
@@ -62,7 +32,6 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgrespassword@db:5432/fortress?schema=public
       REDIS_URL: redis://redis:6379/0
-      QWEN_API_BASE: http://qwen-service:8000/v1
       QDRANT_URL: http://qdrant-db:6333
     depends_on:
       db:
@@ -89,7 +58,6 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgrespassword@db:5432/fortress?schema=public
       REDIS_URL: redis://redis:6379/0
-      QWEN_API_BASE: http://qwen-service:8000/v1
       QDRANT_URL: http://qdrant-db:6333
     depends_on:
       redis:
@@ -101,17 +69,19 @@ services:
     restart: on-failure
 
   frontend:
-    image: node:20-slim
-    working_dir: /app
+    build:
+      context: ./frontend
+      target: dev
     volumes:
       - ./frontend:/app
-    command: sh -c "npm install && npm run dev"
+      - /app/node_modules
     ports:
       - "3000:3000"
     env_file:
       - .env
     environment:
-      - NEXT_PUBLIC_API_URL=
+      - BACKEND_API_URL=http://backend:8080
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
     depends_on:
       - backend
     restart: always

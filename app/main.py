@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.routes import health, conversations, chat, datasets, documents, ws
+from app.routes import health, conversations, chat, datasets, documents, ws, auth
 
 # ── Logging ──────────────────────────────────────────────────
 
@@ -76,6 +76,7 @@ app.add_middleware(
 # ── Routes ───────────────────────────────────────────────────
 
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(conversations.router)
 app.include_router(chat.router)
 app.include_router(datasets.router)

@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 
@@ -38,20 +39,27 @@ class Settings(BaseSettings):
     # ── Redis & Celery ────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # ── Authentication ───────────────────────────────────────
+    NEXTAUTH_SECRET: str = ""
+    SECRET_KEY: str = ""
+
     # ── File uploads ──────────────────────────────────────────
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 25
     USE_PYMUPDF: bool = True
-
-    # ── Clerk Authentication ──────────────────────────────────
-    CLERK_JWKS_URL: str = "https://your-app.clerk.accounts.dev/.well-known/jwks.json"
-    CLERK_ISSUER: str = "https://your-app.clerk.accounts.dev"
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("NEXTAUTH_SECRET", "SECRET_KEY")
+    @classmethod
+    def validate_required_secrets(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("Authentication secrets must be configured via environment variables")
+        return value
 
     @property
     def upload_path(self) -> Path:

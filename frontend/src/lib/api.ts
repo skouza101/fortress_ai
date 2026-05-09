@@ -1,3 +1,5 @@
+import { getSession } from "next-auth/react";
+
 /** Central API base URL — configurable via env var */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -5,8 +7,26 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 async function getAuthToken() {
   if (typeof window !== "undefined") {
-    // @ts-ignore
-    return window.Clerk?.session?.getToken();
+    const session = await getSession();
+    if (!session) {
+      console.warn("[API] No active session found via getSession()");
+      return null;
+    }
+    
+    console.debug("[API] Session found:", {
+      user: session.user ? "present" : "absent",
+      expires: session.expires,
+      hasAccessToken: !!(session as any).accessToken || !!(session.user as any)?.accessToken
+    });
+
+    // Check both root and user object (for robustness)
+    const token = (session as any).accessToken || (session.user as any)?.accessToken;
+    
+    if (!token) {
+      console.warn("[API] Session found, but accessToken is MISSING. Session object keys:", Object.keys(session), "User keys:", session.user ? Object.keys(session.user) : "N/A");
+    }
+    
+    return token || null;
   }
   return null;
 }
@@ -16,7 +36,17 @@ async function apiFetch<T>(
   options?: RequestInit
 ): Promise<T> {
   const token = await getAuthToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  if (token) {
+    console.debug(`[API] Fetching ${path} with token present`);
+  } else {
+    console.warn(`[API] Fetching ${path} WITHOUT token!`);
+  }
+  
+  // Ensure path starts with / if not absolute
+  const targetPath = path.startsWith("/") ? path : `/${path}`;
+  const url = `${API_BASE}${targetPath}`;
+
+  const res = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -122,7 +152,9 @@ export const chatApi = {
     contract_type?: string;
   }, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>> {
     const token = await getAuthToken();
-    const res = await fetch(`${API_BASE}/api/chat/stream`, {
+    console.debug(`[API] Streaming with token: ${token ? 'present' : 'MISSING'}`);
+    const url = `${API_BASE}/api/chat/stream`;
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -170,7 +202,9 @@ export const chatApi = {
     contract_type?: string;
   }, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>> {
     const token = await getAuthToken();
-    const res = await fetch(`${API_BASE}/api/chat/audit`, {
+    console.debug(`[API] Auditing with token: ${token ? 'present' : 'MISSING'}`);
+    const url = `${API_BASE}/api/chat/audit`;
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -218,8 +252,10 @@ export const chatApi = {
     form.append("conversation_id", conversationId);
     
     const token = await getAuthToken();
+    console.debug(`[API] Uploading with token: ${token ? 'present' : 'MISSING'}`);
+    const url = `${API_BASE}/api/chat/upload`;
 
-    const res = await fetch(`${API_BASE}/api/chat/upload`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

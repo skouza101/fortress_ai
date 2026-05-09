@@ -61,21 +61,33 @@ async def generate(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    logger.info(f"LLM generate | model={model} | prompt_len={len(prompt)}")
+    logger.info(f"LLM generate | model={model} | provider={settings.LLM_PROVIDER}")
 
-    response = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        stream=False,
-        presence_penalty=0.6,
-        frequency_penalty=0.6,
-    )
-
-    content = response.choices[0].message.content or ""
-    logger.info(f"LLM response | model={model} | response_len={len(content)}")
-    return content
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+            presence_penalty=0.6,
+            frequency_penalty=0.6,
+        )
+        if not response or not getattr(response, "choices", None):
+            logger.warning("LLM response missing choices in generate")
+            return ""
+        if len(response.choices) == 0:
+            logger.warning("LLM response returned empty choices in generate")
+            return ""
+        message = response.choices[0].message
+        content = getattr(message, "content", None) or ""
+        logger.info(f"LLM response | response_len={len(content)}")
+        return content
+    except Exception as e:
+        logger.error(f"LLM generation failed: {e}")
+        if "chat template" in str(e).lower():
+            return "Error: The LLM service requires a chat template. Please ensure your provider (vLLM/NIM) is correctly configured."
+        raise
 
 
 async def stream(
@@ -93,21 +105,31 @@ async def stream(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    logger.info(f"LLM stream | model={model} | prompt_len={len(prompt)}")
+    logger.info(f"LLM stream | model={model} | provider={settings.LLM_PROVIDER}")
 
-    response = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        stream=True,
-        presence_penalty=0.6,
-        frequency_penalty=0.6,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            presence_penalty=0.6,
+            frequency_penalty=0.6,
+        )
 
-    async for chunk in response:
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+        async for chunk in response:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if getattr(delta, "content", None) is not None:
+                yield delta.content
+    except Exception as e:
+        logger.error(f"LLM stream failed: {e}")
+        if "chat template" in str(e).lower():
+            yield "Error: The LLM service requires a chat template. Please ensure your provider (vLLM/NIM) is correctly configured."
+        else:
+            raise
 
 
 async def generate_with_history(
@@ -125,19 +147,31 @@ async def generate_with_history(
         api_messages.append({"role": "system", "content": system_prompt})
     api_messages.extend(messages)
 
-    logger.info(f"LLM generate_with_history | model={model} | turns={len(messages)}")
+    logger.info(f"LLM generate_with_history | model={model} | provider={settings.LLM_PROVIDER}")
 
-    response = await client.chat.completions.create(
-        model=model,
-        messages=api_messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        stream=False,
-        presence_penalty=0.6,
-        frequency_penalty=0.6,
-    )
-
-    return response.choices[0].message.content or ""
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=api_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+            presence_penalty=0.6,
+            frequency_penalty=0.6,
+        )
+        if not response or not getattr(response, "choices", None):
+            logger.warning("LLM response missing choices in generate_with_history")
+            return ""
+        if len(response.choices) == 0:
+            logger.warning("LLM response returned empty choices in generate_with_history")
+            return ""
+        message = response.choices[0].message
+        return getattr(message, "content", None) or ""
+    except Exception as e:
+        logger.error(f"LLM history generate failed: {e}")
+        if "chat template" in str(e).lower():
+            return "Error: The LLM service requires a chat template."
+        raise
 
 
 async def stream_with_history(
@@ -155,21 +189,32 @@ async def stream_with_history(
         api_messages.append({"role": "system", "content": system_prompt})
     api_messages.extend(messages)
 
-    logger.info(f"LLM stream_with_history | model={model} | turns={len(messages)}")
+    logger.info(f"LLM stream_with_history | model={model} | provider={settings.LLM_PROVIDER}")
 
-    response = await client.chat.completions.create(
-        model=model,
-        messages=api_messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        stream=True,
-        presence_penalty=0.6,
-        frequency_penalty=0.6,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=api_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            presence_penalty=0.6,
+            frequency_penalty=0.6,
+        )
 
-    async for chunk in response:
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+        async for chunk in response:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            # Yield regular content (check is not None, not falsy, to avoid dropping empty strings)
+            if getattr(delta, "content", None) is not None:
+                yield delta.content
+    except Exception as e:
+        logger.error(f"LLM history stream failed: {e}")
+        if "chat template" in str(e).lower():
+            yield "Error: The LLM service requires a chat template."
+        else:
+            raise
 
 
 async def check_connectivity() -> Dict[str, bool]:

@@ -7,7 +7,7 @@ import {
   Clock,
   Settings,
   FileText,
-  PanelLeft,
+  PanelRightOpen,
   Zap,
   Info,
   Languages,
@@ -16,25 +16,11 @@ import {
 } from "lucide-react";
 import { Conversation, CONTRACT_TYPE_LABELS } from "@/types";
 import ChatActionsMenu from "./ChatActionsMenu";
+import { useSession } from "next-auth/react";
+import { motion } from "framer-motion";
+import Image from "next/image";
 
-interface SidebarProps {
-  conversations: Conversation[];
-  activeConversationId: string | null;
-  onNewChat: () => void;
-  onSelectConversation: (id: string) => void;
-  onDeleteConversation: (id: string) => void;
-  onRenameConversation?: (id: string, name: string) => void;
-  onPinConversation?: (id: string) => void;
-  onToggleSidebar?: () => void;
-  isDragging?: boolean;
-}
-
-const VERDICT_DOT: Record<string, string> = {
-  SIGN: "bg-success shadow-[0_0_6px_rgba(7,202,107,0.5)]",
-  NEGOTIATE: "bg-warning shadow-[0_0_6px_rgba(232,149,88,0.5)]",
-  REJECT: "bg-danger shadow-[0_0_6px_rgba(234,33,67,0.5)]",
-  SEEK_COUNSEL: "bg-primary shadow-[0_0_6px_rgba(24,86,255,0.5)]",
-};
+// ... (SidebarProps and VERDICT_DOT unchanged)
 
 export default function Sidebar({
   conversations,
@@ -48,11 +34,32 @@ export default function Sidebar({
   isDragging = false,
 }: SidebarProps) {
   const [showFooterMenu, setShowFooterMenu] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const { data: session } = useSession();
+
+  type AuthUser = {
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+    userType?: string | null;
+  };
+
+  const user = session?.user as AuthUser | undefined;
+  const userType = user?.userType;
+  const initials = user?.name 
+    ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+    : user?.email?.slice(0, 2).toUpperCase() || "??";
 
   return (
-    <aside className={`w-72 border-r border-white/10 bg-surface/80 backdrop-blur-2xl flex flex-col hidden md:flex z-20 shadow-[4px_0_24px_rgba(0,0,0,0.2)] transition-all duration-300 ${
-      isDragging ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
-    }`}>
+    <motion.aside 
+      initial={{ x: -300, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: -300, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      className={`w-72 border-r border-white/10 bg-surface/80 backdrop-blur-2xl flex flex-col hidden md:flex z-20 shadow-[4px_0_24px_rgba(0,0,0,0.2)] transition-colors duration-300 ${
+        isDragging ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
+      }`}
+    >
       {/* Brand */}
       <div className="h-16 flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center">
@@ -69,7 +76,7 @@ export default function Sidebar({
             className="p-1.5 rounded-md hover:bg-white/5 text-muted-foreground transition-colors"
             title="Hide Sidebar (⌘B)"
           >
-            <PanelLeft className="w-5 h-5" />
+            <PanelRightOpen className="w-5 h-5" />
           </button>
         )}
       </div>
@@ -195,12 +202,27 @@ export default function Sidebar({
       {/* Footer */}
       <div className="px-4 py-4 border-t border-white/10 shrink-0">
         <div className="flex items-center gap-3 px-2">
-          <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-xs font-bold text-primary">
-            FA
-          </div>
+          {user?.image && !imageError ? (
+            <Image
+              src={user.image}
+              alt={user.name || "User"}
+              width={32}
+              height={32}
+              className="rounded-full border border-primary/20 shadow-sm"
+              onError={() => setImageError(true)}
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">
+              {initials}
+            </div>
+          )}
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-secondary truncate">Fortress AI</p>
-            <p className="text-[10px] text-muted-foreground">Contract Risk Assessment</p>
+            <p className="text-xs font-bold text-secondary truncate">
+              {user?.name || "Fortress User"}
+            </p>
+            <p className="text-[10px] text-muted-foreground capitalize">
+              {userType || "Member"}
+            </p>
           </div>
           <button
             onClick={() => setShowFooterMenu(!showFooterMenu)}
@@ -214,6 +236,6 @@ export default function Sidebar({
           </button>
         </div>
       </div>
-    </aside>
+    </motion.aside>
   );
 }

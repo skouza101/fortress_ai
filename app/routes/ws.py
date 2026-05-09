@@ -1,56 +1,33 @@
 import json
 import logging
-import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from app.services.pubsub import get_subscriber
-from app.core.config import settings
-
-from jwt import PyJWKClient
+from app.core.auth import verify_nextauth_token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 
-# Initialize JWK client with caching
-jwks_client = PyJWKClient(settings.CLERK_JWKS_URL)
-
-async def verify_clerk_token(token: str) -> str:
+async def verify_ws_token(token: str) -> str:
     """
-    Validate the Clerk JWT token using RS256 signature verification.
+    Validate the NextAuth JWT token.
     """
     if not token:
         raise ValueError("No token provided")
     
     try:
-        # Get the signing key from the JWKS endpoint
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-        
-        # Decode and verify the token
-        payload = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            issuer=settings.CLERK_ISSUER,
-        )
-        
-        user_id = payload.get("sub")
-        if not user_id:
-            raise ValueError("Token does not contain a user ID (sub).")
+        user_id = verify_nextauth_token(token)
         return user_id
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token has expired.")
-    except jwt.InvalidTokenError as e:
-        raise ValueError(f"Invalid token: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error during token validation: {e}")
+        logger.error(f"WS Token validation failed: {e}")
         raise ValueError(f"Token validation failed: {str(e)}")
 
 
 @router.websocket("/progress")
 async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     try:
-        # 1. Clerk JWT Validation
-        user_id = await verify_clerk_token(token)
+        # 1. JWT Validation
+        user_id = await verify_ws_token(token)
     except Exception as e:
         logger.error(f"WebSocket auth failed: {e}")
         await websocket.close(code=1008) # Policy Violation

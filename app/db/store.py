@@ -50,6 +50,30 @@ class PrismaStore:
             }
         )
 
+    # ── Users ──────────────────────────────────────────
+
+    async def update_user(
+        self,
+        user_id: str,
+        name: Optional[str] = None,
+        user_type: Optional[str] = None,
+    ) -> bool:
+        data = {}
+        if name is not None:
+            data["name"] = name
+        if user_type is not None:
+            data["userType"] = user_type
+            
+        if not data:
+            existing = await self.prisma.user.find_unique(where={"id": user_id})
+            return existing is not None
+            
+        updated = await self.prisma.user.update_many(
+            where={"id": user_id},
+            data=data
+        )
+        return updated > 0
+
     # ── Conversations ────────────────────────────────────────
 
     async def create_conversation(

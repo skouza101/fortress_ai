@@ -4,11 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, Loader2, Scale, User } from "lucide-react";
-import { useSignUp } from "@clerk/nextjs";
+import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 
 export default function SignupPage() {
-  const { isLoaded, signUp, setActive } = useSignUp();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -17,8 +16,6 @@ export default function SignupPage() {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [pendingVerification, setPendingVerification] = useState(false);
-  const [code, setCode] = useState("");
   const router = useRouter();
 
   const passwordsMatch = password === confirmPassword;
@@ -26,39 +23,38 @@ export default function SignupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isLoaded || !canSubmit) return;
+    if (!canSubmit) return;
     setLoading(true);
     setError("");
 
     try {
-      await signUp.create({ emailAddress: email, password });
-      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
-      setPendingVerification(true);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.errors?.[0]?.message || "Failed to create account");
-    } finally {
-      setLoading(false);
-    }
-  };
+      // In a real app, you'd call an API to create the user
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, accountType }),
+      });
 
-  const handleVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isLoaded) return;
-    setLoading(true);
-    setError("");
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.message || "Failed to create account");
+      }
 
-    try {
-      const result = await signUp.attemptEmailAddressVerification({ code });
-      if (result.status === "complete") {
-        await setActive({ session: result.createdSessionId });
-        router.push("/chat");
+      // Automatically sign in after signup
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
+
+      if (result?.error) {
+        router.push("/auth/login?registered=true");
       } else {
-        setError("Verification requires further action.");
+        router.push("/chat");
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.errors?.[0]?.message || "Invalid verification code.");
+      setError(err.message || "Failed to create account");
     } finally {
       setLoading(false);
     }
@@ -66,69 +62,8 @@ export default function SignupPage() {
 
   const handleGoogleSignUp = async (e: React.MouseEvent) => {
     e.preventDefault();
-    if (!isLoaded) return;
-    try {
-      await signUp.authenticateWithRedirect({
-        strategy: "oauth_google",
-        redirectUrl: "/auth/sso-callback",
-        redirectUrlComplete: "/chat",
-      });
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.errors?.[0]?.message || "Something went wrong during Google Sign Up.");
-    }
+    await signIn("google", { callbackUrl: "/chat" });
   };
-
-  if (pendingVerification) {
-    return (
-      <div className="glass-panel rounded-2xl p-8 border-[#1B3A5C]/30">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-extrabold text-secondary mb-1">Check your email</h1>
-          <p className="text-sm text-muted-foreground">We sent a 6-digit code to <span className="text-blue-300">{email}</span></p>
-        </div>
-
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-sm p-3 rounded-xl mb-4 text-center">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleVerify} className="space-y-4">
-          <div>
-            <label className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5">
-              Verification Code
-            </label>
-            <input
-              type="text"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="Enter 6-digit code"
-              required
-              autoFocus
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-secondary placeholder:text-muted-foreground focus:outline-none focus:border-[#1B3A5C]/60 focus:shadow-[0_0_10px_rgba(27,58,92,0.2)] transition-all text-center tracking-widest font-mono text-lg"
-            />
-          </div>
-          <Button
-            type="submit"
-            disabled={!code || loading || !isLoaded}
-            variant="glass"
-            size="lg"
-            className="w-full"
-          >
-            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {loading ? "Verifying..." : "Verify Email"}
-          </Button>
-        </form>
-
-        <p className="text-center text-xs text-muted-foreground mt-6">
-          Wrong email?{" "}
-          <button onClick={() => setPendingVerification(false)} className="text-blue-300 hover:text-blue-200 font-semibold transition-colors">
-            Go back
-          </button>
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="glass-panel rounded-2xl p-8 border-[#1B3A5C]/30">
@@ -250,7 +185,7 @@ export default function SignupPage() {
         {/* Submit */}
         <Button
           type="submit"
-          disabled={!canSubmit || !isLoaded}
+          disabled={!canSubmit}
           variant="glass"
           size="lg"
           className="w-full"
@@ -275,7 +210,6 @@ export default function SignupPage() {
           variant="glass-secondary"
           size="lg"
           className="w-full"
-          disabled={!isLoaded}
         >
           <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>

@@ -2,13 +2,14 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PanelLeft, Upload, FileCheck } from "lucide-react";
+import { PanelRightClose, PanelRightOpen, Upload, FileCheck } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
 import EmptyState from "@/components/EmptyState";
 import AttachedFilesPanel from "@/components/AttachedFilesPanel";
 import { motion, AnimatePresence } from "framer-motion";
+import { useSession } from "next-auth/react";
 import {
   Message,
   Conversation,
@@ -152,6 +153,7 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
 export default function ChatPage() {
   const params = useParams();
   const router = useRouter();
+  const { status } = useSession();
   const chatId = params.id as string;
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -191,6 +193,8 @@ export default function ChatPage() {
 
   // ── Load conversations from backend on mount ────────────────
   useEffect(() => {
+    if (status !== "authenticated") return;
+
     conversationsApi.list().then((list) => {
       setConversations((prev) => {
         return list.map((apiConv) => {
@@ -203,7 +207,7 @@ export default function ChatPage() {
         });
       });
     }).catch(console.error);
-  }, []);
+  }, [status]);
 
   // ── Local helpers ───────────────────────────────────────────
   const updateConversation = useCallback(
@@ -811,19 +815,21 @@ export default function ChatPage() {
         )}
       </AnimatePresence>
 
-      {isSidebarOpen && (
-        <Sidebar
-          conversations={sortedConversations}
-          activeConversationId={activeConversationId}
-          onNewChat={createNewChat}
-          onSelectConversation={handleSelectConversation}
-          onDeleteConversation={handleDelete}
-          onRenameConversation={handleRename}
-          onPinConversation={handlePin}
-          onToggleSidebar={() => setIsSidebarOpen(false)}
-          isDragging={isDragging}
-        />
-      )}
+      <AnimatePresence mode="wait">
+        {isSidebarOpen && (
+          <Sidebar
+            conversations={sortedConversations}
+            activeConversationId={activeConversationId}
+            onNewChat={createNewChat}
+            onSelectConversation={handleSelectConversation}
+            onDeleteConversation={handleDelete}
+            onRenameConversation={handleRename}
+            onPinConversation={handlePin}
+            onToggleSidebar={() => setIsSidebarOpen(false)}
+            isDragging={isDragging}
+          />
+        )}
+      </AnimatePresence>
 
       <main className="flex-1 flex flex-col overflow-hidden relative z-10">
         {/* Floating toggle for empty state */}
@@ -834,7 +840,7 @@ export default function ChatPage() {
               className="p-2 rounded-lg bg-surface/60 backdrop-blur-xl border border-white/10 text-muted-foreground hover:text-secondary transition-colors shadow-lg"
               title="Toggle Sidebar (⌘B)"
             >
-              <PanelLeft className="w-5 h-5" />
+              <PanelRightOpen className="w-5 h-5" />
             </button>
           </div>
         )}
@@ -863,7 +869,7 @@ export default function ChatPage() {
                   className="p-1.5 rounded-md hover:bg-white/5 text-muted-foreground transition-colors"
                   title="Show Sidebar (⌘B)"
                 >
-                  <PanelLeft className="w-5 h-5" />
+                  <PanelRightOpen className="w-5 h-5" />
                 </button>
               )}
               <h2 className="text-sm font-bold text-secondary truncate">
