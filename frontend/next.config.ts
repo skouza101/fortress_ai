@@ -1,14 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: "http://backend:8080/api/:path*",
-      },
-    ];
-  },
+  // Production-ready config for Vercel
+  // We'll use the full backend URL in frontend/src/lib/api.ts instead of rewrites
+  // for more reliable cross-origin communication in serverless environments.
 };
 
 export default nextConfig;

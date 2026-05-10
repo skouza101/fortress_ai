@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     USE_PYMUPDF: bool = True
 
     # ── Clerk Authentication ──────────────────────────────────
+    DISABLE_AUTH: bool = True
     CLERK_JWKS_URL: str = "https://your-app.clerk.accounts.dev/.well-known/jwks.json"
     CLERK_ISSUER: str = "https://your-app.clerk.accounts.dev"
 

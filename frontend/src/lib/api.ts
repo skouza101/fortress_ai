@@ -1,5 +1,5 @@
 /** Central API base URL — configurable via env var */
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://129.212.191.242:8080";
 
 // ─── Generic fetch wrapper ────────────────────────────────────
 

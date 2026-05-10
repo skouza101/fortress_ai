@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -29,9 +28,7 @@ export default function RootLayout({
       className={`${jakarta.variable} ${jetbrains.variable} h-full antialiased`}
     >
       <body className="h-full min-h-screen font-sans bg-background text-foreground">
-        <ClerkProvider>
-          {children}
-        </ClerkProvider>
+        {children}
       </body>
     </html>
   );

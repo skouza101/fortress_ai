@@ -42,16 +42,10 @@ export default function Header() {
         {/* Desktop Auth */}
         <div className="hidden md:flex items-center gap-3">
           <Link
-            href="/auth/login"
-            className="text-sm font-medium text-muted-foreground hover:text-secondary transition-colors px-4 py-2"
-          >
-            Sign In
-          </Link>
-          <Link
-            href="/auth/signup"
+            href="/chat"
             className="glass-button text-sm font-semibold px-5 py-2.5 rounded-xl"
           >
-            Get Started
+            Launch App
           </Link>
         </div>
 
@@ -79,11 +73,8 @@ export default function Header() {
             </Link>
           ))}
           <div className="flex gap-3 pt-3 border-t border-white/10">
-            <Link href="/auth/login" className="flex-1 text-center text-sm font-medium text-muted-foreground py-2.5 rounded-xl border border-white/10 hover:bg-white/5 transition-colors">
-              Sign In
-            </Link>
-            <Link href="/auth/signup" className="flex-1 text-center glass-button text-sm font-semibold py-2.5 rounded-xl">
-              Get Started
+            <Link href="/chat" className="flex-1 text-center glass-button text-sm font-semibold py-2.5 rounded-xl">
+              Launch App
             </Link>
           </div>
         </div>

@@ -8,7 +8,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 jwks_client = PyJWKClient(settings.CLERK_JWKS_URL)
 
 def verify_clerk_token(token: str) -> str:
@@ -45,6 +45,16 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Security(securi
     """
     FastAPI dependency to authenticate the user and return their user_id.
     """
+    if settings.DISABLE_AUTH:
+        return "anonymous_user"
+
+    if not credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
         user_id = verify_clerk_token(credentials.credentials)
         return user_id
