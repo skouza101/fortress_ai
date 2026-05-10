@@ -1,14 +1,16 @@
 import logging
+import os
 import jwt
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jwt import PyJWKClient
+from typing import Optional
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 jwks_client = PyJWKClient(settings.CLERK_JWKS_URL)
 
 def verify_clerk_token(token: str) -> str:
@@ -41,10 +43,20 @@ def verify_clerk_token(token: str) -> str:
         raise ValueError(f"Token validation failed: {str(e)}")
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
+def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)) -> str:
     """
     FastAPI dependency to authenticate the user and return their user_id.
     """
+    if os.getenv("FORTRESS_BYPASS_AUTH", "false").lower() == "true":
+        return "dev-local-user"
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication failed: Missing bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
         user_id = verify_clerk_token(credentials.credentials)
         return user_id

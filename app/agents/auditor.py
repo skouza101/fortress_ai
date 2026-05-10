@@ -14,15 +14,14 @@ logger = logging.getLogger(__name__)
 
 class FinalAuditor:
     async def run(self, state: AgentState) -> AgentState:
-        """Audit analysis with structure validation and generate final report."""
-        logger.info("FinalAuditor: Validating structure-aware analysis")
+        """Audit analysis and generate final report in a single LLM call."""
+        logger.info("FinalAuditor: Generating final report")
 
-        research = state.get("research_report", "")
         risk_analysis = state.get("risk_analysis", {})
         parsed_doc = state.get("parsed_document")
         sources = state.get("sources", [])
 
-        # Step 1: Validate structure references
+        # Step 1: Validate structure references (no LLM needed — pure logic)
         validation_errors = []
         coverage_metrics = {}
         
@@ -33,29 +32,17 @@ class FinalAuditor:
             if validation_errors:
                 logger.warning(f"Validation errors found: {validation_errors}")
         
-        # Step 2: Structure validation audit
-        validation_prompt = self._build_validation_prompt(
+        # Step 2: Single combined LLM call — validate + generate final report together
+        combined_prompt = self._build_combined_prompt(
             risk_analysis,
             parsed_doc,
             validation_errors,
-            coverage_metrics
-        )
-        validation_result = await generate(
-            validation_prompt,
-            system_prompt="You are a critical Legal Auditor focused on accuracy and completeness."
-        )
-
-        # Step 3: Final report with structure context
-        report_prompt = self._build_final_report_prompt(
-            risk_analysis,
-            parsed_doc,
-            validation_result,
             coverage_metrics,
             sources
         )
         final_report = await generate(
-            report_prompt,
-            system_prompt="You are a professional legal reporter creating actionable reports."
+            combined_prompt,
+            system_prompt="You are a professional Legal Auditor and Reporter. Validate findings and produce an actionable report."
         )
 
         # Build structure context for state
@@ -63,7 +50,7 @@ class FinalAuditor:
 
         return {
             **state,
-            "audit_report": validation_result,
+            "audit_report": final_report,
             "final_report_md": final_report,
             "structure_validation": {
                 "errors": validation_errors,
@@ -71,7 +58,62 @@ class FinalAuditor:
                 "context": structure_context
             }
         }
-    
+
+    def _build_combined_prompt(
+        self,
+        risk_analysis: Dict,
+        parsed_doc,
+        validation_errors: List,
+        coverage_metrics: Dict,
+        sources: List
+    ) -> str:
+        """Single prompt that validates findings AND generates the final report."""
+
+        error_context = ""
+        if validation_errors:
+            error_context = f"""
+VALIDATION ERRORS (flag these in your report):
+{chr(10).join(f"- {e}" for e in validation_errors)}
+"""
+
+        coverage_context = ""
+        if coverage_metrics:
+            missing = coverage_metrics.get("missing_key_clauses", [])
+            coverage_context = f"""
+COVERAGE: {coverage_metrics.get('key_clause_coverage_pct', 0)}% key clauses analyzed.
+{f"MISSING CRITICAL CLAUSES: {', '.join(c['section'] + ' ' + c['title'] for c in missing[:5])}" if missing else ""}
+"""
+
+        doc_context = ""
+        if parsed_doc:
+            doc_context = f"DOCUMENT: {parsed_doc.page_count} pages, {len(parsed_doc.sections)} sections."
+
+        sources_text = ""
+        if sources:
+            sources_text = "\n".join(f"- {s.get('title', s.get('url', ''))}" for s in sources[:5])
+
+        return f"""
+You are a Senior Legal Auditor. Review the risk analysis below, note any validation issues, then generate a concise professional report.
+
+{doc_context}
+{error_context}
+{coverage_context}
+
+RISK ANALYSIS:
+{json.dumps(risk_analysis, indent=2)[:4000]}
+
+SOURCES:
+{sources_text or "None"}
+
+Generate a professional Markdown report with:
+1. **Executive Summary** — overall verdict (High Risk / Conditional / Compliant), key finding count
+2. **Key Findings** — top risks organized by severity, with section refs and recommendations
+3. **Coverage Notes** — any missing critical clauses or validation errors
+4. **Sources** — list research sources used
+
+Be concise and actionable. Skip findings with invalid section references.
+"""
+
     def _build_validation_prompt(
         self,
         risk_analysis: Dict,

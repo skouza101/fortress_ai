@@ -115,37 +115,16 @@ async def run_pipeline(
                             parsed_doc,
                         )
 
-                        # PHASE 4: Strict validation before deduplication
+                        # Validate section references (informational only — do NOT drop findings)
                         validation_errors = validate_section_references(risk_json, parsed_doc)
-        
-                        # PHASE 4: Filter out findings with critical validation errors
                         if validation_errors:
-                            logger.warning(f"Validation errors found: {validation_errors}")
-                            valid_findings = []
-                            for finding in risk_json["findings"]:
-                                # Only keep findings that pass validation
-                                section_ref = finding.get("section")
-                                if not section_ref:
-                                    continue  # Skip findings without sections
-        
-                                # Check if this finding has validation errors
-                                finding_has_errors = False
-                                for error in validation_errors:
-                                    if f"'{section_ref}'" in error or f"section {section_ref}" in error.lower():
-                                        finding_has_errors = True
-                                        break
-        
-                                if not finding_has_errors:
-                                    valid_findings.append(finding)
-        
-                            risk_json["findings"] = valid_findings
-                            logger.info(f"Filtered findings: {len(risk_json['findings'])} valid after validation")
-                        else:
-                            # No validation errors - proceed with deduplication
-                            risk_json["findings"] = _deduplicate_findings(
-                                risk_json["findings"],
-                                parsed_doc
-                            )
+                            logger.warning(f"Validation warnings (findings kept): {validation_errors}")
+
+                        # Deduplicate findings — keeps all, even with imperfect section refs
+                        risk_json["findings"] = _deduplicate_findings(
+                            risk_json["findings"],
+                            parsed_doc
+                        )
         
                         # Add validation and coverage metrics
                         coverage = calculate_coverage_metrics(risk_json, parsed_doc)

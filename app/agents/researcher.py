@@ -7,7 +7,6 @@ import httpx
 
 from app.core.config import settings
 from app.agents.state import AgentState
-from app.services.llm import generate
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +115,7 @@ class HybridResearcher:
                 merged_results.append(res)
                 sources.append({"title": res.get("title", res["source"]), "url": res["source"]})
 
-        # Format context for the next agent
+        # Format context for the next agent (no LLM summarization needed — analyst uses raw context)
         context_str = "\n\n".join([
             f"SOURCE: {res['source']}\n"
             f"TYPE: {res.get('type', 'unknown')}\n"
@@ -128,23 +127,11 @@ class HybridResearcher:
         if document_structure:
             context_str = f"DOCUMENT STRUCTURE:\n{document_structure}\n\n{context_str}"
 
-        # Generate a research summary report
-        summary_prompt = f"""
-        Analyze the following research results for the query: "{query}"
-        
-        RESULTS:
-        {context_str}
-        
-        Provide a concise research report highlighting key legal precedents, regulations, and findings.
-        """
-        
-        research_report = await generate(summary_prompt, system_prompt="You are a meticulous legal researcher.")
-
         return {
             **state,
             "internal_docs": internal_results,
             "web_results": web_results,
             "merged_context": context_str,
             "sources": sources,
-            "research_report": research_report
+            "research_report": context_str  # Pass raw context; analyst will use it directly
         }

@@ -1,5 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
+const BYPASS_AUTH = process.env.FORTRESS_BYPASS_AUTH === "true";
+
 // Define which routes are public (don't require login)
 const isPublicRoute = createRouteMatcher([
   "/",
@@ -9,6 +11,10 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
+  if (BYPASS_AUTH) {
+    return;
+  }
+
   if (!isPublicRoute(request)) {
     await auth.protect();
   }

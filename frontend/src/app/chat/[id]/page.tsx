@@ -56,27 +56,16 @@ function apiMsgToLocal(m: import("@/lib/api").ApiMessage): Message {
 }
 
 // ── Parser to build ContractReport from backend output ───────
-function parseBackendReport(riskAnalysis: any, contractType?: ContractType): ContractReport {
+function parseBackendReport(riskAnalysis: any, contractType?: ContractType, rawSources?: any[]): ContractReport {
   const safeData = riskAnalysis || {};
-  
+
   const mapSeverityToRiskLevel = (sev: string): RiskLevel => {
     const s = (sev || "").toLowerCase();
-    if (s.includes("crit") || s.includes("high")) return "high"; // backend only has High/Med/Low typically
+    if (s.includes("crit")) return "critical";
+    if (s.includes("high")) return "high";
     if (s.includes("med")) return "medium";
     return "low";
   };
-
-  const rawRedFlags = Array.isArray(safeData.red_flags) ? safeData.red_flags : [];
-  const rawPenalties = Array.isArray(safeData.penalties) ? safeData.penalties : [];
-  const rawObligations = Array.isArray(safeData.obligations) ? safeData.obligations : [];
-
-  const parsedRedFlags: RedFlag[] = rawRedFlags.map((rf: any, i: number) => ({
-    id: `rf-${i}`,
-    title: rf.issue || "Identified Risk",
-    description: rf.description || "Potential liability or violation found.",
-    section: rf.section || "General",
-    severity: mapSeverityToRiskLevel(rf.severity),
-  }));
 
   const parsedRiskMatrix = {
     critical: [] as RiskItem[],
@@ -84,9 +73,61 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
     medium: [] as RiskItem[],
     low: [] as RiskItem[],
   };
-
-  // Convert penalties & obligations into RiskMatrix items
   let itemCounter = 0;
+  const parsedRedFlags: RedFlag[] = [];
+
+  // ── Structure-aware path: analyst returns findings[] ───────────────
+  const rawFindings = Array.isArray(safeData.findings) ? safeData.findings : [];
+  if (rawFindings.length > 0) {
+    rawFindings.forEach((f: any, i: number) => {
+      const level = mapSeverityToRiskLevel(f.risk || f.severity || "medium");
+      const item: RiskItem = {
+        id: `fi-${i}`,
+        clause: f.title || "Identified Risk",
+        section: f.section || "General",
+        level,
+        description: f.justification || f.description || "",
+        suggestion: f.recommendation,
+        originalText: f.contract_text,
+        contract_text: f.contract_text,
+        page: f.page,
+        justification: f.justification,
+        priority: f.priority,
+        related_sections: f.related_sections,
+        clause_type: f.clause_type,
+      };
+      if (level === "critical") parsedRiskMatrix.critical.push(item);
+      else if (level === "high") parsedRiskMatrix.high.push(item);
+      else if (level === "medium") parsedRiskMatrix.medium.push(item);
+      else parsedRiskMatrix.low.push(item);
+
+      if (level === "critical" || level === "high") {
+        parsedRedFlags.push({
+          id: `rf-fi-${i}`,
+          title: f.title || "Identified Risk",
+          description: f.justification || f.description || "",
+          section: f.section || "General",
+          severity: level,
+        });
+      }
+    });
+  }
+
+  // ── Legacy path: analyst returns red_flags / penalties / obligations ──
+  const rawRedFlags = Array.isArray(safeData.red_flags) ? safeData.red_flags : [];
+  const rawPenalties = Array.isArray(safeData.penalties) ? safeData.penalties : [];
+  const rawObligations = Array.isArray(safeData.obligations) ? safeData.obligations : [];
+
+  rawRedFlags.forEach((rf: any, i: number) => {
+    parsedRedFlags.push({
+      id: `rf-${i}`,
+      title: rf.issue || "Identified Risk",
+      description: rf.description || "Potential liability or violation found.",
+      section: rf.section || "General",
+      severity: mapSeverityToRiskLevel(rf.severity),
+    });
+  });
+
   [...rawPenalties, ...rawObligations].forEach((item: any) => {
     const isPenalty = "impact" in item;
     const level = mapSeverityToRiskLevel(item.severity || "medium");
@@ -97,38 +138,36 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
       level,
       description: isPenalty ? item.impact : item.description,
     };
-    
     if (level === "critical") parsedRiskMatrix.critical.push(riskItem);
     else if (level === "high") parsedRiskMatrix.high.push(riskItem);
     else if (level === "medium") parsedRiskMatrix.medium.push(riskItem);
     else parsedRiskMatrix.low.push(riskItem);
   });
 
-  // Add red flags to high/critical as well if needed, but let's keep them separate to fit UI.
-  // Actually, UI renders all items in the matrix. Let's add red flags to high/critical.
   rawRedFlags.forEach((rf: any) => {
     const level = mapSeverityToRiskLevel(rf.severity);
     const riskItem: RiskItem = {
-      id: `ri-${itemCounter++}`,
+      id: `ri-rf-${itemCounter++}`,
       clause: rf.issue || "Risk Issue",
       section: rf.section || "General",
       level,
       description: rf.description,
     };
-    if (level === "critical" || level === "high") parsedRiskMatrix.high.push(riskItem);
+    if (level === "critical") parsedRiskMatrix.critical.push(riskItem);
+    else if (level === "high") parsedRiskMatrix.high.push(riskItem);
     else if (level === "medium") parsedRiskMatrix.medium.push(riskItem);
     else parsedRiskMatrix.low.push(riskItem);
   });
 
-  // Calculate verdict based on red flags
-  const verdict = parsedRedFlags.length > 2 || parsedRiskMatrix.high.length > 2 
-    ? "SEEK_COUNSEL" 
-    : parsedRedFlags.length > 0 ? "NEGOTIATE" : "SIGN";
+  const totalHigh = parsedRiskMatrix.critical.length + parsedRiskMatrix.high.length;
+  const verdict = parsedRiskMatrix.critical.length > 0 || totalHigh > 3
+    ? "SEEK_COUNSEL"
+    : totalHigh > 0 ? "NEGOTIATE" : "SIGN";
 
   return {
     verdict,
     contractType: contractType || "other",
-    executiveSummary: safeData.summary || "The contract has been analyzed. See the risk matrix and red flags below.",
+    executiveSummary: safeData.summary || "The contract has been analyzed. See the risk matrix and clause-by-clause analysis below.",
     riskMatrix: parsedRiskMatrix,
     redFlags: parsedRedFlags,
     recommendations: [
@@ -142,7 +181,30 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
       glossary: [],
       legalReferences: [],
       benchmarks: [],
+      evidence: rawFindings
+        .filter((f: any) => f.contract_text)
+        .map((f: any) => ({
+          section: f.section || "General",
+          page: f.page,
+          quote: f.contract_text,
+          title: f.title,
+        })),
+      sources: (Array.isArray(rawSources) ? rawSources : []).map((s: any) => ({
+        title: s.title || s.source || "Source",
+        url: s.url || s.source || "",
+        ...(s.type ? { type: s.type } : {}),
+      })),
     },
+    ...(safeData.validation ? {
+      validation: {
+        ...safeData.validation,
+        coverage: safeData.validation.coverage ? {
+          ...safeData.validation.coverage,
+          // remap backend field name to frontend type
+          key_clause_sections: safeData.validation.coverage.total_key_sections ?? safeData.validation.coverage.key_clause_sections,
+        } : undefined,
+      }
+    } : {}),
   };
 }
 
@@ -348,7 +410,7 @@ export default function ChatPage() {
               updateMessage(convId, reportMsgId, { content: reportContent, isStreaming: true });
             }
           } else if (ev === "done") {
-            const contractReport = parseBackendReport(data.risk_analysis, contractType);
+            const contractReport = parseBackendReport(data.risk_analysis, contractType, data.sources as any[]);
             updateMessage(convId, reportMsgId, { 
               isStreaming: false, 
               report: contractReport 
