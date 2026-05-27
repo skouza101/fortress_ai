@@ -44,6 +44,23 @@ class Settings(BaseSettings):
             raise ValueError("Authentication secrets must be configured via environment variables")
         return value
 
+    @field_validator("REDIS_URL", mode="before")
+    @classmethod
+    def normalize_redis_url(cls, value: str) -> str:
+        if not value or not str(value).strip():
+            return "redis://localhost:6379/0"
+
+        redis_url = str(value).strip().strip('"').strip("'")
+        if redis_url.startswith(("redis://", "rediss://", "unix://")):
+            return redis_url
+
+        # Render's Redis/Key Value internal address is sometimes copied as
+        # host:port from the dashboard. The Python Redis client requires a URL.
+        if "://" not in redis_url and ":" in redis_url:
+            return f"redis://{redis_url}"
+
+        return redis_url
+
     @property
     def upload_path(self) -> Path:
         p = Path(self.UPLOAD_DIR)

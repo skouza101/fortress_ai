@@ -37,7 +37,12 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     logger.info(f"WebSocket connected for user: {user_id}")
 
     # 2. Subscribe to user's Redis Pub/Sub channel
-    pubsub = await get_subscriber(user_id)
+    try:
+        pubsub = await get_subscriber(user_id)
+    except Exception as e:
+        logger.error(f"Unable to subscribe to progress updates for user {user_id}: {e}")
+        await websocket.close(code=1011)
+        return
 
     try:
         # Read from Redis and send to WebSocket

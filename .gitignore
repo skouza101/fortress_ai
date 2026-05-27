@@ -21,3 +21,12 @@ index.lock
 .docker/
 .venv
 
+.codex-backend.err.log
+.codex-backend.out.log
+.gitignore
+.gitignore
+.gitignore
+frontend/.codex-next.out.log
+.codex-next-local.err.log
+.codex-next-local.out.log
+frontend/.codex-next.err.log
