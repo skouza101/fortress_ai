@@ -37,18 +37,54 @@ class PrismaStore:
         if self.prisma.is_connected():
             await self.prisma.disconnect()
 
-    async def _ensure_user_exists(self, user_id: str) -> None:
-        """Create a lightweight local user record when auth is bypassed in development."""
+    async def _ensure_user_exists(self, user_id: str, email: Optional[str] = None) -> None:
+        """Create a lightweight local user record when auth is bypassed or for new OAuth users."""
         existing = await self.prisma.user.find_unique(where={"id": user_id})
         if existing:
+            return
+
+        # If email not provided, use a placeholder
+        final_email = email or f"{user_id}@local.fortress"
+        
+        # Check if email already exists (e.g. user previously signed up with credentials)
+        # In that case, we might want to link them, but for now we just avoid a crash.
+        email_exists = await self.prisma.user.find_unique(where={"email": final_email})
+        if email_exists:
+            logger.warning(f"Email {final_email} already exists for user {email_exists.id}. Cannot create new user with ID {user_id}")
             return
 
         await self.prisma.user.create(
             data={
                 "id": user_id,
-                "email": f"{user_id}@local.fortress",
+                "email": final_email,
             }
         )
+
+    async def create_user(
+        self,
+        email: str,
+        name: str,
+        user_type: str,
+        password_hash: str,
+    ) -> bool:
+        """Create a new user with email and password."""
+        try:
+            await self.prisma.user.create(
+                data={
+                    "email": email,
+                    "name": name,
+                    "userType": user_type,
+                    "passwordHash": password_hash,
+                }
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create user: {e}")
+            return False
+
+    async def get_user_by_email(self, email: str):
+        """Find a user by their email address."""
+        return await self.prisma.user.find_unique(where={"email": email})
 
     # ── Users ──────────────────────────────────────────
 
@@ -58,6 +94,9 @@ class PrismaStore:
         name: Optional[str] = None,
         user_type: Optional[str] = None,
     ) -> bool:
+        logger.info(f"Updating user profile: id={user_id}, name={name}, type={user_type}")
+        await self._ensure_user_exists(user_id)
+        
         data = {}
         if name is not None:
             data["name"] = name
@@ -65,14 +104,18 @@ class PrismaStore:
             data["userType"] = user_type
             
         if not data:
-            existing = await self.prisma.user.find_unique(where={"id": user_id})
-            return existing is not None
+            return True
             
-        updated = await self.prisma.user.update_many(
-            where={"id": user_id},
-            data=data
-        )
-        return updated > 0
+        try:
+            await self.prisma.user.update(
+                where={"id": user_id},
+                data=data
+            )
+            logger.info(f"Successfully updated user {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update user {user_id}: {e}")
+            return False
 
     # ── Conversations ────────────────────────────────────────
 
@@ -162,6 +205,7 @@ class PrismaStore:
         role: str,
         content: str,
         attachment: Optional[dict] = None,
+        report: Optional[dict] = None,
     ) -> Optional[MessageOut]:
         # Verify conversation belongs to user
         conv = await self.prisma.conversation.find_first(
@@ -176,7 +220,10 @@ class PrismaStore:
             "content": content,
             "conversation": {"connect": {"id": conversation_id}},
         }
-        
+
+        if report:
+            data["report"] = json.dumps(report)
+
         if attachment:
             data["attachment"] = {
                 "create": {
@@ -186,7 +233,6 @@ class PrismaStore:
                     "type": attachment["type"],
                 }
             }
-
         msg = await self.prisma.message.create(
             data=data,
             include={"attachment": True}

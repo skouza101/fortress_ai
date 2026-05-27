@@ -30,8 +30,10 @@ logger = logging.getLogger(__name__)
 
 async def run_pipeline(
     text: str,
+    query: str | None = None,
     contract_type: str | None = None,
     user_type: str | None = None,
+    model: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Run the full audit pipeline using the LangGraph orchestration layer,
@@ -48,9 +50,11 @@ async def run_pipeline(
     yield _sse({"event": "steps_init", "data": {"steps": steps}})
 
     # 2. Setup initial state for LangGraph
+    effective_query = query or f"Perform a full legal audit of this {contract_type or 'contract'}."
+
     initial_state: AgentState = {
-        "query": f"Analyze this {contract_type or 'contract'} for a {user_type or 'user'}.",
-        "original_query": f"Full audit of contract ({contract_type or 'unknown type'})",
+        "query": effective_query,
+        "original_query": effective_query,
         "internal_docs": [],
         "web_results": [],
         "merged_context": text,
@@ -60,6 +64,7 @@ async def run_pipeline(
         "audit_report": "",
         "final_report_md": "",
         "next_step": "",
+        "model": model,
         "errors": [],
         "iteration_count": 0,
         "reflection_log": []

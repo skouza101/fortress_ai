@@ -96,6 +96,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     user_type: Optional[UserType] = None
     contract_type: Optional[ContractType] = None
+    model: Optional[str] = None
 
 
 class ConversationCreateRequest(BaseModel):

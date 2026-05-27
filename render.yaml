@@ -1,0 +1,72 @@
+services:
+  # ─── BACKEND FASTAPI SERVICE ───────────────────────────────
+  - type: web
+    name: fortress-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    port: 8080
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fortress-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: fortress-redis
+          property: connectionString
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false # User will set this in Render Dashboard
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
+      - key: TAVILY_API_KEY
+        sync: false
+
+  # ─── CELERY WORKER ──────────────────────────────────────────
+  - type: worker
+    name: fortress-worker
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A app.worker.celery_app worker --concurrency=1 --loglevel=info
+    plan: starter
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fortress-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: fortress-redis
+          property: connectionString
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true
+
+  # ─── REDIS ──────────────────────────────────────────────────
+  - type: redis
+    name: fortress-redis
+    plan: starter
+    ipAllowList: [] # Private access only
+
+databases:
+  # ─── POSTGRESQL ─────────────────────────────────────────────
+  - name: fortress-db
+    plan: starter
+    postgresMajorVersion: 15

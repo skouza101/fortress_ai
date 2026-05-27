@@ -21,6 +21,7 @@ class AgentState(TypedDict, total=False):
     
     # Control flow & metadata
     next_step: str
+    model: Optional[str]
     errors: List[str]
     iteration_count: int
     reflection_log: List[str]

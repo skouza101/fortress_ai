@@ -29,13 +29,19 @@ export default function LoginPage() {
       });
 
       if (result?.error) {
-        setError("Invalid email or password");
-      } else {
+        // Map specific NextAuth error codes to user-friendly messages
+        if (result.error === "CredentialsSignin") {
+          setError("Invalid email or password. Please try again.");
+        } else {
+          setError("Sign in failed. Please check your credentials.");
+        }
+      } else if (result?.ok) {
         router.push("/chat");
+        router.refresh();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error signing in", err);
-      setError("Failed to sign in. Please check your credentials.");
+      setError("A network error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -43,17 +49,9 @@ export default function LoginPage() {
 
   const handleGoogleSignIn = async (e: React.MouseEvent) => {
     e.preventDefault();
-    try {
-      const result = await signIn("google", { callbackUrl: "/chat", redirect: false });
-      if (result?.error) {
-        setError("Something went wrong during Google Sign In.");
-      } else if (result?.url) {
-        router.push(result.url);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError("Something went wrong during Google Sign In.");
-    }
+    setError("");
+    // Google OAuth requires a full redirect — do NOT use redirect: false
+    await signIn("google", { callbackUrl: "/chat" });
   };
 
   return (
@@ -65,23 +63,31 @@ export default function LoginPage() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
-          <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-sm p-3 rounded-xl mb-4 text-center">
+          <div
+            role="alert"
+            className="bg-red-500/10 border border-red-500/50 text-red-400 text-sm p-3 rounded-xl mb-4 text-center"
+          >
             {error}
           </div>
         )}
         {/* Email */}
         <div>
-          <label className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5">
+          <label
+            htmlFor="login-email"
+            className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5"
+          >
             Email
           </label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
+              id="login-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
+              autoComplete="email"
               className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-sm text-secondary placeholder:text-muted-foreground focus:outline-none focus:border-[#1B3A5C]/60 focus:shadow-[0_0_10px_rgba(27,58,92,0.2)] transition-all"
             />
           </div>
@@ -89,22 +95,28 @@ export default function LoginPage() {
 
         {/* Password */}
         <div>
-          <label className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5">
+          <label
+            htmlFor="login-password"
+            className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5"
+          >
             Password
           </label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
+              id="login-password"
               type={showPass ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
+              autoComplete="current-password"
               className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-12 py-3 text-sm text-secondary placeholder:text-muted-foreground focus:outline-none focus:border-[#1B3A5C]/60 focus:shadow-[0_0_10px_rgba(27,58,92,0.2)] transition-all"
             />
             <button
               type="button"
               onClick={() => setShowPass(!showPass)}
+              aria-label={showPass ? "Hide password" : "Show password"}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-secondary transition-colors"
             >
               {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -123,15 +135,18 @@ export default function LoginPage() {
             />
             <span className="text-xs text-muted-foreground">Remember me</span>
           </label>
-          <span className="text-xs text-blue-300 transition-colors font-medium cursor-not-allowed opacity-50" aria-disabled="true">
+          <Link
+            href="/auth/forgot-password"
+            className="text-xs text-blue-300 hover:text-blue-200 transition-colors font-medium"
+          >
             Forgot Password?
-          </span>
+          </Link>
         </div>
 
         {/* Submit */}
         <Button
           type="submit"
-          disabled={loading}
+          disabled={loading || !email || !password}
           variant="glass"
           size="lg"
           className="w-full"
@@ -150,10 +165,10 @@ export default function LoginPage() {
 
       {/* Social */}
       <div className="grid grid-cols-1 gap-3">
-        <Button 
+        <Button
           type="button"
-          onClick={handleGoogleSignIn} 
-          variant="glass-secondary" 
+          onClick={handleGoogleSignIn}
+          variant="glass-secondary"
           size="lg"
           className="w-full"
         >

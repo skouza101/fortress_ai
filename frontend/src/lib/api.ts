@@ -12,7 +12,7 @@ async function getAuthToken() {
       console.warn("[API] No active session found via getSession()");
       return null;
     }
-    
+
     console.debug("[API] Session found:", {
       user: session.user ? "present" : "absent",
       expires: session.expires,
@@ -21,11 +21,11 @@ async function getAuthToken() {
 
     // Check both root and user object (for robustness)
     const token = (session as any).accessToken || (session.user as any)?.accessToken;
-    
+
     if (!token) {
       console.warn("[API] Session found, but accessToken is MISSING. Session object keys:", Object.keys(session), "User keys:", session.user ? Object.keys(session.user) : "N/A");
     }
-    
+
     return token || null;
   }
   return null;
@@ -41,7 +41,7 @@ async function apiFetch<T>(
   } else {
     console.warn(`[API] Fetching ${path} WITHOUT token!`);
   }
-  
+
   // Ensure path starts with / if not absolute
   const targetPath = path.startsWith("/") ? path : `/${path}`;
   const url = `${API_BASE}${targetPath}`;
@@ -86,6 +86,8 @@ export interface ApiMessage {
     size: number;
     type: string;
   };
+  report?: any;
+  sources?: any;
 }
 
 // ─── Conversations ────────────────────────────────────────────
@@ -134,6 +136,7 @@ export const chatApi = {
     conversation_id?: string;
     user_type?: string;
     contract_type?: string;
+    model?: string;
   }): Promise<{ message: ApiMessage; conversation_id: string }> {
     return apiFetch("/api/chat", {
       method: "POST",
@@ -150,6 +153,7 @@ export const chatApi = {
     conversation_id?: string;
     user_type?: string;
     contract_type?: string;
+    model?: string;
   }, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>> {
     const token = await getAuthToken();
     console.debug(`[API] Streaming with token: ${token ? 'present' : 'MISSING'}`);
@@ -165,7 +169,8 @@ export const chatApi = {
     });
 
     if (!res.ok || !res.body) {
-      throw new Error(`Stream error ${res.status}`);
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail ?? `Stream error ${res.status}`);
     }
 
     const reader = res.body.getReader();
@@ -200,6 +205,7 @@ export const chatApi = {
     conversation_id?: string;
     user_type?: string;
     contract_type?: string;
+    model?: string;
   }, signal?: AbortSignal): AsyncGenerator<Record<string, unknown>> {
     const token = await getAuthToken();
     console.debug(`[API] Auditing with token: ${token ? 'present' : 'MISSING'}`);
@@ -250,7 +256,7 @@ export const chatApi = {
     const form = new FormData();
     form.append("file", file);
     form.append("conversation_id", conversationId);
-    
+
     const token = await getAuthToken();
     console.debug(`[API] Uploading with token: ${token ? 'present' : 'MISSING'}`);
     const url = `${API_BASE}/api/chat/upload`;

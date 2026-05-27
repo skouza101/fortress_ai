@@ -51,7 +51,7 @@ workflow.add_edge("auditor", END)
 multi_agent_graph = workflow.compile()
 
 # Helper to run the graph
-async def run_legal_audit(query: str, text_context: str = ""):
+async def run_legal_audit(query: str, text_context: str = "", model: str | None = None):
     """Entry point for the Multi-Agent Orchestration layer."""
     initial_state: AgentState = {
         "query": query,
@@ -65,6 +65,7 @@ async def run_legal_audit(query: str, text_context: str = ""):
         "audit_report": "",
         "final_report_md": "",
         "next_step": "",
+        "model": model,
         "errors": [],
         "iteration_count": 0,
         "reflection_log": []

@@ -8,19 +8,9 @@ services:
       POSTGRES_PASSWORD: postgrespassword
       POSTGRES_DB: fortress
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: always
-
-
-  qdrant-db:
-    image: qdrant/qdrant:latest
-    container_name: qdrant-db
-    ports:
-      - "6333:6333"
-    volumes:
-      - ./qdrant_storage:/qdrant/storage
     restart: always
 
   backend:
@@ -32,7 +22,6 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgrespassword@db:5432/fortress?schema=public
       REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant-db:6333
     depends_on:
       db:
         condition: service_started
@@ -58,7 +47,6 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgrespassword@db:5432/fortress?schema=public
       REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant-db:6333
     depends_on:
       redis:
         condition: service_started
@@ -75,6 +63,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      - /app/.next
     ports:
       - "3000:3000"
     env_file:
@@ -89,4 +78,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  qdrant_data:

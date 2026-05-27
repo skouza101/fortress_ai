@@ -16,7 +16,6 @@ import {
   Sparkles,
   ArrowRight,
   CheckCircle,
-  Star,
   Briefcase,
   User,
   Zap,
@@ -46,11 +45,6 @@ const STEPS = [
   { icon: FileCheck, title: "Risk Report", desc: "Structured report with verdict, red flags, and actionable advice." },
 ];
 
-const TESTIMONIALS = [
-  { name: "Sarah Chen", role: "Corporate Attorney, NY", quote: "Fortress AI cuts my initial contract review time by 80%. The clause-by-clause analysis is remarkably thorough.", rating: 5 },
-  { name: "Marcus Johnson", role: "Small Business Owner", quote: "Finally, a tool that explains legal jargon in plain English. Saved me thousands in legal fees on my lease.", rating: 5 },
-  { name: "Rachel Torres", role: "IP Attorney, CA", quote: "The risk matrix gives my clients instant clarity. I use it in every initial consultation now.", rating: 5 },
-];
 
 export default function LandingPage() {
   return (
@@ -191,27 +185,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ─── TESTIMONIALS ────────────────────────── */}
-        <section className="py-24 relative">
-          <div className="max-w-6xl mx-auto px-6">
-            <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={fadeUp} custom={0} className="text-center mb-16">
-              <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-primary mb-3">Testimonials</p>
-              <h2 className="text-3xl md:text-4xl font-extrabold text-secondary">Trusted by legal professionals</h2>
-            </motion.div>
-            <div className="grid md:grid-cols-3 gap-6">
-              {TESTIMONIALS.map((t, i) => (
-                <motion.div key={t.name} initial="hidden" whileInView="visible" viewport={{ once: true }} variants={fadeUp} custom={i + 1} className="glass-panel rounded-xl p-6">
-                  <div className="flex gap-0.5 mb-4">{Array.from({ length: t.rating }).map((_, j) => <Star key={j} className="w-4 h-4 text-warning fill-warning" />)}</div>
-                  <p className="text-sm text-secondary leading-relaxed mb-4 italic">&ldquo;{t.quote}&rdquo;</p>
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-xs font-bold text-primary">{t.name.split(" ").map(n => n[0]).join("")}</div>
-                    <div><p className="text-xs font-semibold text-secondary">{t.name}</p><p className="text-[10px] text-muted-foreground">{t.role}</p></div>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </section>
 
         {/* ─── FINAL CTA ───────────────────────────── */}
         <section className="py-28 relative overflow-hidden">

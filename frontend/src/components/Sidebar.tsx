@@ -10,17 +10,33 @@ import {
   PanelRightOpen,
   Zap,
   Info,
-  Languages,
-  Mail,
   Upload,
 } from "lucide-react";
-import { Conversation, CONTRACT_TYPE_LABELS } from "@/types";
+import { Conversation, CONTRACT_TYPE_LABELS, ContractType } from "@/types";
 import ChatActionsMenu from "./ChatActionsMenu";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import Image from "next/image";
+import Link from "next/link";
 
-// ... (SidebarProps and VERDICT_DOT unchanged)
+interface SidebarProps {
+  conversations: Conversation[];
+  activeConversationId: string | null;
+  onNewChat: () => void;
+  onSelectConversation: (id: string) => void;
+  onDeleteConversation: (id: string) => void;
+  onRenameConversation: (id: string, newTitle: string) => void;
+  onPinConversation: (id: string) => void;
+  onToggleSidebar?: () => void;
+  isDragging?: boolean;
+}
+
+const VERDICT_DOT: Record<string, string> = {
+  SIGN: "bg-success shadow-[0_0_6px_rgba(7,202,107,0.5)]",
+  NEGOTIATE: "bg-warning shadow-[0_0_6px_rgba(232,149,88,0.5)]",
+  REJECT: "bg-danger shadow-[0_0_6px_rgba(234,33,67,0.5)]",
+  SEEK_COUNSEL: "bg-primary shadow-[0_0_6px_rgba(24,86,255,0.5)]",
+};
 
 export default function Sidebar({
   conversations,
@@ -46,19 +62,18 @@ export default function Sidebar({
 
   const user = session?.user as AuthUser | undefined;
   const userType = user?.userType;
-  const initials = user?.name 
+  const initials = user?.name
     ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
     : user?.email?.slice(0, 2).toUpperCase() || "??";
 
   return (
-    <motion.aside 
+    <motion.aside
       initial={{ x: -300, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: -300, opacity: 0 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className={`w-72 border-r border-white/10 bg-surface/80 backdrop-blur-2xl flex flex-col hidden md:flex z-20 shadow-[4px_0_24px_rgba(0,0,0,0.2)] transition-colors duration-300 ${
-        isDragging ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
-      }`}
+      className={`w-72 border-r border-white/10 bg-surface/80 backdrop-blur-2xl flex flex-col hidden md:flex z-20 shadow-[4px_0_24px_rgba(0,0,0,0.2)] transition-colors duration-300 ${isDragging ? "ring-2 ring-primary ring-inset bg-primary/5" : ""
+        }`}
     >
       {/* Brand */}
       <div className="h-16 flex items-center justify-between px-4 shrink-0">
@@ -113,7 +128,7 @@ export default function Sidebar({
             <p className="text-[10px] text-muted-foreground mt-1">New analysis will begin</p>
           </div>
         )}
-        
+
         {conversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
             <Clock className="w-5 h-5 mb-2 opacity-50" />
@@ -127,16 +142,14 @@ export default function Sidebar({
               <div
                 key={conv.id}
                 onClick={() => onSelectConversation(conv.id)}
-                className={`w-full cursor-pointer text-left flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 group relative ${
-                  isActive
+                className={`w-full cursor-pointer text-left flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 group relative ${isActive
                     ? "bg-white/10 border border-white/20 shadow-sm"
                     : "border border-transparent hover:bg-white/5"
-                }`}
+                  }`}
               >
                 <FileText
-                  className={`w-4 h-4 mt-0.5 shrink-0 ${
-                    isActive ? "text-primary" : "text-muted-foreground"
-                  }`}
+                  className={`w-4 h-4 mt-0.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"
+                    }`}
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -144,9 +157,8 @@ export default function Sidebar({
                       <span className={`w-2 h-2 rounded-full shrink-0 ${verdictDot}`} />
                     )}
                     <p
-                      className={`text-sm font-medium truncate ${
-                        isActive ? "text-secondary" : "text-muted-foreground"
-                      }`}
+                      className={`text-sm font-medium truncate ${isActive ? "text-secondary" : "text-muted-foreground"
+                        }`}
                     >
                       {conv.title}
                     </p>
@@ -154,7 +166,7 @@ export default function Sidebar({
                   <div className="flex items-center gap-1.5 mt-0.5">
                     {conv.contractType && (
                       <span className="text-[9px] font-mono text-primary/70 bg-primary/10 px-1.5 py-0.5 rounded border border-primary/15">
-                        {CONTRACT_TYPE_LABELS[conv.contractType]}
+                        {CONTRACT_TYPE_LABELS[conv.contractType as ContractType]}
                       </span>
                     )}
                   </div>
@@ -180,22 +192,14 @@ export default function Sidebar({
             <Zap className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
             <span>Upgrade Plan</span>
           </button>
-          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-secondary hover:bg-white/5 transition-all">
+          <Link href="/about" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-secondary hover:bg-white/5 transition-all">
             <Info className="w-4 h-4" />
             <span>About Us</span>
-          </button>
-          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-secondary hover:bg-white/5 transition-all relative">
-            <Languages className="w-4 h-4" />
-            <span>Language</span>
-          </button>
-          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-secondary hover:bg-white/5 transition-all">
-            <Mail className="w-4 h-4" />
-            <span>User Feedback</span>
-          </button>
-          <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-secondary hover:bg-white/5 transition-all">
+          </Link>
+          <Link href="/settings" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-secondary hover:bg-white/5 transition-all">
             <Settings className="w-4 h-4" />
             <span>Settings</span>
-          </button>
+          </Link>
         </div>
       )}
 
@@ -226,11 +230,10 @@ export default function Sidebar({
           </div>
           <button
             onClick={() => setShowFooterMenu(!showFooterMenu)}
-            className={`p-1.5 rounded-lg transition-all duration-200 ${
-              showFooterMenu
+            className={`p-1.5 rounded-lg transition-all duration-200 ${showFooterMenu
                 ? "bg-primary/10 text-primary shadow-[0_0_10px_rgba(24,86,255,0.1)]"
                 : "hover:bg-white/5 text-muted-foreground hover:text-secondary"
-            }`}
+              }`}
           >
             <Settings className={`w-4 h-4 transition-transform duration-300 ${showFooterMenu ? 'rotate-90' : ''}`} />
           </button>

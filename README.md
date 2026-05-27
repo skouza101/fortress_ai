@@ -13,7 +13,7 @@
 
 - **Unified Qwen Pipeline**: Orchestrated via LangGraph, utilizing **Qwen-3.6** for structured extraction, risk analysis, and report synthesis.
 - **Hardware-Aware Design**: Optimized for ROCm 7.x and AMD MI300X clusters via vLLM.
-- **High-Density RAG**: Integrated **Qdrant** vector database for multilingual legal context.
+- **Web Research**: Tavily-backed legal and market research for external context.
 - **Enterprise Auth**: Secure user management and SSO via **Clerk**.
 - **Live Streaming**: Real-time audit reports via Server-Sent Events (SSE).
 - **Asynchronous Processing**: Background tasks powered by **Celery** and **Redis**.
@@ -27,7 +27,7 @@
 - **Framework**: FastAPI (Async)
 - **Orchestration**: LangGraph (Multi-agent DAG)
 - **Inference**: vLLM (OpenAI-compatible)
-- **Database**: PostgreSQL (Prisma ORM) & Qdrant (Vector DB)
+- **Database**: PostgreSQL (Prisma ORM)
 - **Task Queue**: Celery & Redis
 
 ### Frontend
@@ -65,7 +65,6 @@ graph TD
 
     subgraph Data_Cloud [Persistence Layer]
         PG[(PostgreSQL)]
-        Qdrant[(Qdrant Vector DB)]
     end
 
     User <--> NextJS
@@ -76,19 +75,18 @@ graph TD
     LGraph -- Inference --> vLLM
     vLLM -- ROCm Accelerated --> Qwen
     
-    LGraph <--> Qdrant
     API <--> PG
     
     API -- Tasks --> Redis
     Redis <--> Celery
-    Celery -- RAG / Audit --> LGraph
+    Celery -- Audit --> LGraph
 ```
 
 ### 🧠 The Audit Pipeline
 The system follows a 4-node "Chain of Thought" process orchestrated by **LangGraph**:
 
 1.  🔍 **Extraction Node**: Converts unstructured PDFs/Docs into clean legal primitives (parties, dates, clauses).
-2.  📚 **Research Node**: Performs semantic search against the **Qdrant** store for precedents and statutory context.
+2.  📚 **Research Node**: Performs web research for precedents, statutes, and market context.
 3.  ⚠️ **Risk Node**: Cross-references clauses against a risk matrix to identify liabilities and red flags.
 4.  📝 **Reporter Node**: Synthesizes the analysis into a professional, human-readable audit report via SSE.
 

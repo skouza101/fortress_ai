@@ -3,7 +3,7 @@ from datasets import load_dataset
 import pandas as pd
 from typing import List, Dict, Any
 
-router = APIRouter(prefix="/datasets", tags=["datasets"])
+router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
 @router.get("/cuad/samples")
 async def get_cuad_samples(limit: int = 5):

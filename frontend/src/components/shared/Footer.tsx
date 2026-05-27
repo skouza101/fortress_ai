@@ -9,7 +9,7 @@ const FOOTER_LINKS = {
     { label: "Contract Types", href: "/help/contract-types" },
   ],
   Company: [
-    { label: "About", href: "#" },
+    { label: "About", href: "/about" },
     { label: "Blog", href: "#" },
     { label: "Careers", href: "#" },
     { label: "Press", href: "#" },

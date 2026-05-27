@@ -7,7 +7,6 @@ import {
   FileText, 
   Search, 
   Play, 
-  ChevronRight, 
   Info,
   ShieldCheck,
   Zap,
@@ -16,7 +15,6 @@ import {
 } from "lucide-react";
 import Header from "@/components/shared/Header";
 import Footer from "@/components/shared/Footer";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 interface CUADSample {
@@ -27,6 +25,19 @@ interface CUADSample {
   source: string;
 }
 
+function isCUADSample(value: unknown): value is CUADSample {
+  if (!value || typeof value !== "object") return false;
+
+  const sample = value as Record<string, unknown>;
+  return (
+    typeof sample.id === "string" &&
+    typeof sample.title === "string" &&
+    typeof sample.content === "string" &&
+    typeof sample.full_content === "string" &&
+    typeof sample.source === "string"
+  );
+}
+
 export default function BenchmarkPage() {
   const [samples, setSamples] = useState<CUADSample[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,10 +45,19 @@ export default function BenchmarkPage() {
   const router = useRouter();
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/datasets/cuad/samples?limit=10`)
-      .then(res => res.json())
+    fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/datasets/cuad/samples?limit=10`)
+      .then(async (res) => {
+        const data: unknown = await res.json();
+        if (!res.ok) {
+          const detail = data && typeof data === "object" && "detail" in data
+            ? String((data as { detail: unknown }).detail)
+            : `Request failed with status ${res.status}`;
+          throw new Error(detail);
+        }
+        return data;
+      })
       .then(data => {
-        setSamples(data);
+        setSamples(Array.isArray(data) ? data.filter(isCUADSample) : []);
         setLoading(false);
       })
       .catch(err => {

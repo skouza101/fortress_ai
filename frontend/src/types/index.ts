@@ -43,7 +43,7 @@ export interface RiskItem {
   suggestion?: string;
   industryStandard?: string;
   originalText?: string;
-  
+
   // Phase 2 fields
   page?: number;                    // Page number where section appears
   justification?: string;           // Detailed risk reasoning
@@ -94,7 +94,7 @@ export interface ContractReport {
   redFlags: RedFlag[];
   recommendations: Recommendation[];
   appendix: Appendix;
-  
+
   // Phase 2 fields
   validation?: {
     errors?: string[];
@@ -148,6 +148,8 @@ export interface Message {
   report?: ContractReport;
   /** Pipeline progress indicator */
   analysisSteps?: AnalysisStep[];
+  /** Sources referenced by the message */
+  sources?: { title: string; url: string }[];
 }
 
 export interface Conversation {

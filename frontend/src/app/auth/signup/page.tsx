@@ -7,11 +7,28 @@ import { Mail, Lock, Eye, EyeOff, Loader2, Scale, User } from "lucide-react";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 
+const MIN_PASSWORD_LENGTH = 8;
+
+function getPasswordStrength(pw: string): { label: string; color: string; width: string } | null {
+  if (!pw) return null;
+  if (pw.length < MIN_PASSWORD_LENGTH) return { label: "Too short", color: "bg-red-500", width: "25%" };
+  const hasUpper = /[A-Z]/.test(pw);
+  const hasDigit = /\d/.test(pw);
+  const hasSpecial = /[^A-Za-z0-9]/.test(pw);
+  const score = [hasUpper, hasDigit, hasSpecial].filter(Boolean).length;
+  if (score === 0) return { label: "Weak", color: "bg-orange-500", width: "40%" };
+  if (score === 1) return { label: "Fair", color: "bg-yellow-500", width: "60%" };
+  if (score === 2) return { label: "Good", color: "bg-blue-400", width: "80%" };
+  return { label: "Strong", color: "bg-green-500", width: "100%" };
+}
+
 export default function SignupPage() {
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [accountType, setAccountType] = useState<"attorney" | "individual">("individual");
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -19,7 +36,17 @@ export default function SignupPage() {
   const router = useRouter();
 
   const passwordsMatch = password === confirmPassword;
-  const canSubmit = !!(email && password && confirmPassword && passwordsMatch && acceptTerms && !loading);
+  const passwordStrength = getPasswordStrength(password);
+  const isPasswordValid = password.length >= MIN_PASSWORD_LENGTH;
+  const canSubmit = !!(
+    name &&
+    email &&
+    isPasswordValid &&
+    confirmPassword &&
+    passwordsMatch &&
+    acceptTerms &&
+    !loading
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,16 +55,15 @@ export default function SignupPage() {
     setError("");
 
     try {
-      // In a real app, you'd call an API to create the user
-      const res = await fetch("/api/auth/signup", {
+      const res = await fetch("/api/users/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, accountType }),
+        body: JSON.stringify({ name, email, password, accountType }),
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || "Failed to create account");
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || data.message || "Failed to create account");
       }
 
       // Automatically sign in after signup
@@ -48,13 +74,15 @@ export default function SignupPage() {
       });
 
       if (result?.error) {
+        // Signup succeeded but auto-login failed — send to login with a hint
         router.push("/auth/login?registered=true");
       } else {
         router.push("/chat");
+        router.refresh();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "Failed to create account");
+      setError(err instanceof Error ? err.message : "Failed to create account");
     } finally {
       setLoading(false);
     }
@@ -62,6 +90,7 @@ export default function SignupPage() {
 
   const handleGoogleSignUp = async (e: React.MouseEvent) => {
     e.preventDefault();
+    // Google OAuth requires a full redirect
     await signIn("google", { callbackUrl: "/chat" });
   };
 
@@ -73,7 +102,10 @@ export default function SignupPage() {
       </div>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-sm p-3 rounded-xl mb-4 text-center">
+        <div
+          role="alert"
+          className="bg-red-500/10 border border-red-500/50 text-red-400 text-sm p-3 rounded-xl mb-4 text-center"
+        >
           {error}
         </div>
       )}
@@ -84,9 +116,11 @@ export default function SignupPage() {
           <label className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-2">
             I am
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Account type">
             <button
               type="button"
+              role="radio"
+              aria-checked={accountType === "individual"}
               onClick={() => setAccountType("individual")}
               className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
                 accountType === "individual"
@@ -98,6 +132,8 @@ export default function SignupPage() {
             </button>
             <button
               type="button"
+              role="radio"
+              aria-checked={accountType === "attorney"}
               onClick={() => setAccountType("attorney")}
               className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
                 accountType === "attorney"
@@ -110,17 +146,47 @@ export default function SignupPage() {
           </div>
         </div>
 
+        {/* Full Name */}
+        <div>
+          <label
+            htmlFor="signup-name"
+            className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5"
+          >
+            Full Name
+          </label>
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              id="signup-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="John Doe"
+              required
+              autoComplete="name"
+              className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-sm text-secondary placeholder:text-muted-foreground focus:outline-none focus:border-[#1B3A5C]/60 focus:shadow-[0_0_10px_rgba(27,58,92,0.2)] transition-all"
+            />
+          </div>
+        </div>
+
         {/* Email */}
         <div>
-          <label className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5">Email</label>
+          <label
+            htmlFor="signup-email"
+            className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5"
+          >
+            Email
+          </label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
+              id="signup-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
+              autoComplete="email"
               className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-sm text-secondary placeholder:text-muted-foreground focus:outline-none focus:border-[#1B3A5C]/60 focus:shadow-[0_0_10px_rgba(27,58,92,0.2)] transition-all"
             />
           </div>
@@ -128,38 +194,80 @@ export default function SignupPage() {
 
         {/* Password */}
         <div>
-          <label className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5">Password</label>
+          <label
+            htmlFor="signup-password"
+            className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5"
+          >
+            Password
+          </label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
+              id="signup-password"
               type={showPass ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Min. 8 characters"
               required
+              minLength={MIN_PASSWORD_LENGTH}
+              autoComplete="new-password"
               className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-12 py-3 text-sm text-secondary placeholder:text-muted-foreground focus:outline-none focus:border-[#1B3A5C]/60 focus:shadow-[0_0_10px_rgba(27,58,92,0.2)] transition-all"
             />
-            <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-secondary transition-colors">
+            <button
+              type="button"
+              onClick={() => setShowPass(!showPass)}
+              aria-label={showPass ? "Hide password" : "Show password"}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-secondary transition-colors"
+            >
               {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
+          {/* Password strength indicator */}
+          {passwordStrength && (
+            <div className="mt-2 space-y-1">
+              <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${passwordStrength.color}`}
+                  style={{ width: passwordStrength.width }}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">{passwordStrength.label}</p>
+            </div>
+          )}
         </div>
 
         {/* Confirm Password */}
         <div>
-          <label className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5">Confirm Password</label>
+          <label
+            htmlFor="signup-confirm-password"
+            className="text-[10px] font-mono font-bold uppercase text-muted-foreground tracking-wider block mb-1.5"
+          >
+            Confirm Password
+          </label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
-              type={showPass ? "text" : "password"}
+              id="signup-confirm-password"
+              type={showConfirmPass ? "text" : "password"}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="Repeat password"
               required
-              className={`w-full bg-white/5 border rounded-xl pl-10 pr-4 py-3 text-sm text-secondary placeholder:text-muted-foreground focus:outline-none transition-all ${
-                confirmPassword && !passwordsMatch ? "border-red-500/50 focus:border-red-500/60" : "border-white/10 focus:border-[#1B3A5C]/60"
+              autoComplete="new-password"
+              className={`w-full bg-white/5 border rounded-xl pl-10 pr-12 py-3 text-sm text-secondary placeholder:text-muted-foreground focus:outline-none transition-all ${
+                confirmPassword && !passwordsMatch
+                  ? "border-red-500/50 focus:border-red-500/60"
+                  : "border-white/10 focus:border-[#1B3A5C]/60"
               }`}
             />
+            <button
+              type="button"
+              onClick={() => setShowConfirmPass(!showConfirmPass)}
+              aria-label={showConfirmPass ? "Hide confirm password" : "Show confirm password"}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-secondary transition-colors"
+            >
+              {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
           </div>
           {confirmPassword && !passwordsMatch && (
             <p className="text-[10px] text-red-400 mt-1 font-medium">Passwords do not match</p>
@@ -176,9 +284,13 @@ export default function SignupPage() {
           />
           <span className="text-xs text-muted-foreground leading-relaxed">
             I agree to the{" "}
-            <Link href="#" className="text-blue-300 hover:text-blue-200">Terms of Service</Link>
+            <Link href="/terms" className="text-blue-300 hover:text-blue-200">
+              Terms of Service
+            </Link>
             {" "}and{" "}
-            <Link href="#" className="text-blue-300 hover:text-blue-200">Privacy Policy</Link>
+            <Link href="/privacy" className="text-blue-300 hover:text-blue-200">
+              Privacy Policy
+            </Link>
           </span>
         </label>
 

@@ -42,7 +42,8 @@ class FinalAuditor:
         )
         validation_result = await generate(
             validation_prompt,
-            system_prompt="You are a critical Legal Auditor focused on accuracy and completeness."
+            system_prompt="You are a meticulous Quality Assurance Auditor for legal analysis. You catch errors that others miss. Your validation ensures only accurate, well-supported findings reach the client. Be rigorous but fair.",
+            model=state.get("model"),
         )
 
         # Step 3: Final report with structure context
@@ -55,7 +56,8 @@ class FinalAuditor:
         )
         final_report = await generate(
             report_prompt,
-            system_prompt="You are a professional legal reporter creating actionable reports."
+            system_prompt="You are a senior legal reporting specialist who produces boardroom-ready contract risk assessment reports. Your reports are clear, precise, and actionable — they drive executive decision-making on whether to sign, negotiate, or reject contracts. Use professional formatting with appropriate visual hierarchy.",
+            model=state.get("model"),
         )
 
         # Build structure context for state
@@ -84,13 +86,12 @@ class FinalAuditor:
         error_context = ""
         if validation_errors:
             error_context = f"""
-VALIDATION ERRORS DETECTED:
+## ⚠️ AUTOMATED VALIDATION ERRORS DETECTED
+
+The following issues were flagged by the automated section-reference validator:
 {chr(10).join(f"- {error}" for error in validation_errors)}
 
-YOU MUST:
-1. Flag these invalid references in your audit
-2. Suggest corrections based on actual document sections
-3. Verify all findings reference valid sections
+**YOUR TASK**: Assess each error — determine if it invalidates the finding or if the finding can be salvaged with a corrected reference.
 """
         
         coverage_context = ""
@@ -98,30 +99,30 @@ YOU MUST:
             missing_clauses = coverage_metrics.get("missing_key_clauses", [])
             if missing_clauses:
                 coverage_context = f"""
-COVERAGE ANALYSIS:
+## COVERAGE GAP ANALYSIS
+
+**Current Coverage Metrics:**
 - Section Coverage: {coverage_metrics.get('section_coverage_pct', 0)}%
 - Key Clause Coverage: {coverage_metrics.get('key_clause_coverage_pct', 0)}%
 
-MISSING KEY CLAUSES (Not Analyzed):
-{chr(10).join(f"- Section {c['section']}: {c['title']} ({c['type']}) on Page {c['page']}" for c in missing_clauses[:5])}
+**Critical Sections NOT Analyzed:**
+{chr(10).join(f"- Section {c['section']}: {c['title']} ({c['type']}) — Page {c['page']}" for c in missing_clauses[:5])}
+
+**YOUR TASK**: Flag these gaps prominently in your audit. Missing key clauses represent potential unidentified risks.
 """
         
         doc_context = ""
         if parsed_doc:
             doc_context = f"""
-DOCUMENT STRUCTURE:
+## DOCUMENT STRUCTURE REFERENCE
 - Total Pages: {parsed_doc.page_count}
 - Total Sections: {len(parsed_doc.sections)}
 - Key Clause Types: {', '.join(parsed_doc.structure.get('key_clauses', {}).keys())}
 """
         
-        return f"""
-You are a Senior Legal Analysis Auditor. Review the risk analysis for:
-1. Valid section references
-2. Logical consistency
-3. Complete coverage of key clauses
-4. Specific, actionable recommendations
-5. Proper risk justification
+        return f"""You are the Quality Assurance Auditor for Fortress AI's multi-agent legal analysis pipeline. Your role is the final quality gate before findings reach the client.
+
+---
 
 {doc_context}
 
@@ -129,24 +130,53 @@ You are a Senior Legal Analysis Auditor. Review the risk analysis for:
 
 {coverage_context}
 
-RISK ANALYSIS TO AUDIT:
+## RISK ANALYSIS TO AUDIT
 {json.dumps(risk_analysis, indent=2)}
 
-AUDIT TASKS:
-1. Verify all section references are valid
-2. Check that findings include specific contract language
-3. Ensure risk levels are justified with clear reasoning
-4. Confirm recommendations are actionable and specific
-5. Identify any duplicate findings for the same section
-6. Note any critical clauses that were not analyzed
-7. Assess overall quality and completeness
+---
+
+## AUDIT CRITERIA
+
+Score each finding against these quality gates (Pass/Fail):
+
+| Criterion | Standard |
+|-----------|----------|
+| **Section Accuracy** | Section reference matches a real section in the document |
+| **Evidence Quality** | Finding includes exact contract language (verbatim quote) |
+| **Risk Justification** | Risk level is supported by specific legal/commercial reasoning, not just assertion |
+| **Recommendation Specificity** | Recommendation includes concrete revision language, not generic advice |
+| **Uniqueness** | No duplicate findings covering the same section and risk |
+| **Priority Alignment** | Priority ranking correctly reflects severity and commercial impact |
+
+## ADDITIONAL VALIDATION CHECKS
+
+1. **Logical Consistency**: Do related findings contradict each other?
+2. **Severity Calibration**: Are risk levels proportionate? (e.g., a missing comma shouldn't be "High")
+3. **Completeness**: Are obvious high-risk clause types (indemnification, limitation of liability, termination, IP, confidentiality) addressed?
+4. **Cross-Reference Integrity**: Do `related_sections` references point to valid sections?
+
+---
+
+## OUTPUT FORMAT
 
 Provide a structured audit report with:
-- Validation status (Pass/Fail for each criterion)
-- Specific issues found
-- Recommendations for improvement
-- Overall assessment
-"""
+
+### Overall Quality Score
+Rate the analysis quality: **Excellent / Good / Needs Improvement / Insufficient**
+
+### Finding-by-Finding Audit
+For each finding, provide:
+- Finding title and section
+- Pass/Fail on each criterion
+- Specific issues (if any)
+- Recommended corrections
+
+### Coverage Assessment
+- Which critical clause types are adequately covered?
+- Which are missing and need analysis?
+
+### Improvement Recommendations
+- Ordered list of specific improvements the analysis team should make"""
     
     def _build_final_report_prompt(
         self,
@@ -182,52 +212,72 @@ Provide a structured audit report with:
 {self._format_missing_clauses(coverage_metrics.get('missing_key_clauses', []))}
 """
         
-        return f"""
-You are a Legal Reporting Expert. Generate a comprehensive, professional report.
+        return f"""You are generating the final Contract Risk Assessment Report for Fortress AI. This report will be presented directly to the end user (legal professional or business executive). It must be polished, authoritative, and immediately actionable.
+
+---
 
 {structure_overview}
 
 {coverage_summary}
 
-AUDITOR VALIDATION:
+## QUALITY AUDIT RESULTS
 {validation_result}
 
-RISK ANALYSIS FINDINGS:
+## RISK ANALYSIS FINDINGS
 {json.dumps(risk_analysis, indent=2)}
 
-SOURCES:
-{json.dumps(sources, indent=2) if sources else "No external sources"}
+## RESEARCH SOURCES
+{json.dumps(sources, indent=2) if sources else "No external sources consulted."}
 
-REPORT REQUIREMENTS:
+---
 
-1. **Executive Summary**
-   - Overall verdict (Compliant/Conditional/High Risk)
-   - Key findings count and severity distribution
-   - Critical action items
+## REPORT TEMPLATE
 
-2. **Findings by Section**
-   - Organize findings by document section order
-   - Include section number, title, and page reference
-   - Show risk level, justification, and recommendations
-   - Quote specific contract language
+Generate the report using this exact structure:
 
-3. **Risk Assessment**
-   - Categorize by risk level (High/Medium/Low)
-   - Prioritize by urgency
-   - Provide clear remediation steps
+### 1. Executive Summary
+- **Overall Verdict**: Use one of: ✅ **SIGN** (Low risk) | ⚠️ **NEGOTIATE** (Medium risk, revisions needed) | 🚫 **REJECT** (High risk, fundamental issues) | ⚖️ **SEEK COUNSEL** (Complex legal issues requiring attorney review)
+- **Risk Distribution**: X Critical / X High / X Medium / X Low findings
+- **Top 3 Action Items**: The most urgent issues that must be addressed before signing
+- **Overall Risk Score**: Provide a score out of 100 (100 = no risk, 0 = maximum risk)
 
-4. **Coverage Analysis**
-   - Note which key clauses were analyzed
-   - Highlight any critical sections not reviewed
-   - Suggest areas for deeper analysis if needed
+### 2. Critical & High-Risk Findings
+For each finding (ordered by priority):
+- **Section Reference**: Section X.X — "Section Title" (Page N)
+- **Risk Level**: 🔴 Critical / 🟠 High
+- **Issue**: Clear, concise description of the risk
+- **Contract Language**: > Exact quote from the contract (blockquote format)
+- **Impact**: What happens if this is not addressed
+- **Recommended Revision**: Specific replacement language
 
-5. **Sources & References**
-   - List all research sources
-   - Include relevant legal standards or regulations
+### 3. Medium & Low-Risk Findings
+Same structure as above but grouped separately for readability:
+- 🟡 Medium risks
+- 🟢 Low risks
 
-FORMAT: Professional Markdown with clear headers, bullet points, and tables where appropriate.
-TONE: Clear, actionable, and business-focused.
-"""
+### 4. Risk Matrix Summary
+Present a Markdown table with columns: Section | Risk Level | Issue | Priority | Status
+
+### 5. Coverage Analysis
+- Sections analyzed vs. total sections
+- Key clauses identified and assessed
+- Any sections NOT reviewed (with recommendation to review)
+
+### 6. Sources & Methodology
+- Research sources consulted (with URLs if available)
+- Analysis methodology used
+- Confidence level for each major finding
+
+---
+
+## FORMATTING RULES
+- Use clean Markdown with clear visual hierarchy
+- Use emoji risk indicators consistently (🔴🟠🟡🟢)
+- Use blockquotes (>) for contract language citations
+- Use tables for structured comparisons — NEVER wrap tables in code fences
+- Keep paragraphs short and scannable
+- Use bold for key terms and findings
+- Write in confident, professional tone — no hedging language"""
     
     def _format_key_clauses_summary(self, parsed_doc) -> str:
         """Format key clauses for report."""

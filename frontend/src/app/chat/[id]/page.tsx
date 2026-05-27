@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
-import { PanelRightClose, PanelRightOpen, Upload, FileCheck } from "lucide-react";
+import { PanelRightOpen, Upload, FileCheck, ChevronDown } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import ChatMessage from "@/components/ChatMessage";
 import ChatInput from "@/components/ChatInput";
 import EmptyState from "@/components/EmptyState";
 import AttachedFilesPanel from "@/components/AttachedFilesPanel";
+import SearchResultsPanel from "@/components/SearchResultsPanel";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSession } from "next-auth/react";
 import {
@@ -28,6 +30,13 @@ import { conversationsApi, chatApi } from "@/lib/api";
 function genId() {
   return Math.random().toString(36).substring(2, 11);
 }
+
+const MODEL_OPTIONS = {
+  fast: { label: "Fast", detail: "3.5 Flash", model: "gemini-3.5-flash" },
+  thinking: { label: "Thinking", detail: "3.1 Pro", model: "gemini-3.1-pro-preview" },
+} as const;
+
+type ModelMode = keyof typeof MODEL_OPTIONS;
 
 // ── Convert API conversation → frontend Conversation ─────────
 function apiConvToLocal(api: import("@/lib/api").ApiConversation): Conversation {
@@ -53,13 +62,14 @@ function apiMsgToLocal(m: import("@/lib/api").ApiMessage): Message {
     attachment: m.attachment
       ? { id: m.attachment.id, name: m.attachment.name, size: m.attachment.size, type: m.attachment.type }
       : undefined,
+    report: m.report ? parseBackendReport(m.report) : undefined,
   };
 }
 
 // ── Parser to build ContractReport from backend output ───────
 function parseBackendReport(riskAnalysis: any, contractType?: ContractType): ContractReport {
   const safeData = riskAnalysis || {};
-  
+
   const mapSeverityToRiskLevel = (sev: string): RiskLevel => {
     const s = (sev || "").toLowerCase();
     if (s.includes("crit") || s.includes("high")) return "high"; // backend only has High/Med/Low typically
@@ -70,6 +80,7 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
   const rawRedFlags = Array.isArray(safeData.red_flags) ? safeData.red_flags : [];
   const rawPenalties = Array.isArray(safeData.penalties) ? safeData.penalties : [];
   const rawObligations = Array.isArray(safeData.obligations) ? safeData.obligations : [];
+  const rawFindings = Array.isArray(safeData.findings) ? safeData.findings : [];
 
   const parsedRedFlags: RedFlag[] = rawRedFlags.map((rf: any, i: number) => ({
     id: `rf-${i}`,
@@ -86,8 +97,39 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
     low: [] as RiskItem[],
   };
 
-  // Convert penalties & obligations into RiskMatrix items
   let itemCounter = 0;
+
+  // Process findings from high-fidelity structure-aware agent
+  rawFindings.forEach((finding: any) => {
+    const level = mapSeverityToRiskLevel(finding.risk || finding.severity || "medium");
+    const riskItem: RiskItem = {
+      id: `fi-${itemCounter++}`,
+      clause: finding.title || "Identified Finding",
+      section: finding.section ? `Section ${finding.section}` : "General",
+      level,
+      description: finding.justification || finding.description || "Issue requires review.",
+      suggestion: finding.recommendation,
+      originalText: finding.contract_text,
+    };
+
+    if (level === "critical" || level === "high") {
+      parsedRiskMatrix.high.push(riskItem);
+      // Also add critical findings as red flags
+      parsedRedFlags.push({
+        id: `rf-fi-${itemCounter}`,
+        title: finding.title || "Critical Issue",
+        description: finding.justification || "Requires immediate attention.",
+        section: finding.section || "General",
+        severity: level,
+      });
+    } else if (level === "medium") {
+      parsedRiskMatrix.medium.push(riskItem);
+    } else {
+      parsedRiskMatrix.low.push(riskItem);
+    }
+  });
+
+  // Convert penalties & obligations into RiskMatrix items
   [...rawPenalties, ...rawObligations].forEach((item: any) => {
     const isPenalty = "impact" in item;
     const level = mapSeverityToRiskLevel(item.severity || "medium");
@@ -98,7 +140,7 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
       level,
       description: isPenalty ? item.impact : item.description,
     };
-    
+
     if (level === "critical") parsedRiskMatrix.critical.push(riskItem);
     else if (level === "high") parsedRiskMatrix.high.push(riskItem);
     else if (level === "medium") parsedRiskMatrix.medium.push(riskItem);
@@ -122,8 +164,8 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
   });
 
   // Calculate verdict based on red flags
-  const verdict = parsedRedFlags.length > 2 || parsedRiskMatrix.high.length > 2 
-    ? "SEEK_COUNSEL" 
+  const verdict = parsedRedFlags.length > 2 || parsedRiskMatrix.high.length > 2
+    ? "SEEK_COUNSEL"
     : parsedRedFlags.length > 0 ? "NEGOTIATE" : "SIGN";
 
   return {
@@ -147,6 +189,17 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
   };
 }
 
+function getErrorMessage(err: any): string {
+  const errMsg = err?.message || String(err);
+  if (errMsg.includes("429") || errMsg.includes("Too Many Requests")) {
+    return `⚠️ **Rate Limit Exceeded (HTTP 429)**: The thinking model (\`gemini-3.1-pro-preview\`) is currently rate-limited on this API key.\n\n**Recommendation**:\nPlease switch to the **Fast** (\`gemini-3.5-flash\`) model in the navbar dropdown, which has higher request limits, or try again in a few minutes.`;
+  }
+  if (errMsg.includes("404")) {
+    return `⚠️ **Model Not Found (HTTP 404)**: The selected model is not available or could not be found.\n\n\`\`\`\n${errMsg}\n\`\`\``;
+  }
+  return `⚠️ Failed to connect to analysis service. Please ensure the backend is running.\n\n\`\`\`\n${errMsg}\n\`\`\``;
+}
+
 // ────────────────────────────────────────────────────────────
 // Main Page
 // ────────────────────────────────────────────────────────────
@@ -164,6 +217,31 @@ export default function ChatPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [modelMode, setModelMode] = useState<ModelMode>("fast");
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [activeSearchQuery, setActiveSearchQuery] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const [mounted, setMounted] = useState(false);
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [renameChatId, setRenameChatId] = useState<string | null>(null);
+  const [renameChatName, setRenameChatName] = useState("");
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -177,19 +255,14 @@ export default function ChatPage() {
 
   const activeConversation = conversations.find((c) => c.id === activeConversationId);
   const messages = activeConversation?.messages ?? [];
+  const selectedModel = MODEL_OPTIONS[modelMode].model;
 
   // ── Scroll to bottom on new messages ───────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ── Sync activeConversationId with URL ──────────────────────
-  useEffect(() => {
-    if (chatId && chatId !== activeConversationId) {
-      setActiveConversationId(chatId);
-      handleSelectConversation(chatId);
-    }
-  }, [chatId]);
+
 
   // ── Load conversations from backend on mount ────────────────
   useEffect(() => {
@@ -239,6 +312,37 @@ export default function ChatPage() {
     [updateConversation]
   );
 
+  const ensureBackendConversation = useCallback(
+    async (candidateId: string | null, title: string): Promise<string> => {
+      if (candidateId) {
+        try {
+          const existing = await conversationsApi.get(candidateId);
+          const local = apiConvToLocal(existing);
+          setConversations((prev) => {
+            const current = prev.find((c) => c.id === local.id);
+            if (!current) return [local, ...prev];
+            return prev.map((c) =>
+              c.id === local.id
+                ? { ...local, messages: c.messages.length > 0 ? c.messages : local.messages }
+                : c
+            );
+          });
+          return candidateId;
+        } catch (err) {
+          console.warn("Active conversation is unavailable on the backend; creating a new one.", err);
+        }
+      }
+
+      const api = await conversationsApi.create({ title });
+      const conv = apiConvToLocal(api);
+      setConversations((prev) => [conv, ...prev]);
+      setActiveConversationId(conv.id);
+      router.replace(`/chat/${conv.id}`);
+      return conv.id;
+    },
+    [router]
+  );
+
   // ── Select a conversation — load messages from backend ──────
   const handleSelectConversation = useCallback(
     async (id: string) => {
@@ -246,7 +350,7 @@ export default function ChatPage() {
         router.push(`/chat/${id}`);
         return;
       }
-      
+
       setActiveConversationId(id);
       // If we already have messages locally, no need to refetch
       const existing = conversations.find((c) => c.id === id);
@@ -254,15 +358,42 @@ export default function ChatPage() {
 
       try {
         const full = await conversationsApi.get(id);
-        setConversations((prev) =>
-          prev.map((c) => (c.id === id ? apiConvToLocal(full) : c))
-        );
+        const local = apiConvToLocal(full);
+        setConversations((prev) => {
+          const exists = prev.some((c) => c.id === id);
+          if (exists) {
+            return prev.map((c) => {
+              if (c.id === id) {
+                // If local conversation already has messages (e.g. from user eager typing),
+                // preserve them to avoid overwriting them due to a fetch race condition.
+                const hasLocalMessages = c.messages && c.messages.length > 0;
+                return {
+                  ...local,
+                  messages: hasLocalMessages ? c.messages : local.messages,
+                };
+              }
+              return c;
+            });
+          } else {
+            return [local, ...prev];
+          }
+        });
       } catch (err) {
         console.error("Failed to load conversation:", err);
       }
     },
     [conversations, chatId, router]
   );
+
+  // ── Sync activeConversationId with URL ──────────────────────
+  useEffect(() => {
+    if (chatId) {
+      setActiveConversationId(chatId);
+      handleSelectConversation(chatId);
+    }
+  }, [chatId, handleSelectConversation]);
+
+  // ── Load conversations from backend on mount ────────────────
 
   // ── Create new conversation ─────────────────────────────────
   const createNewChat = useCallback(async () => {
@@ -296,10 +427,10 @@ export default function ChatPage() {
   const runAnalysis = useCallback(
     async (convId: string, contractType: ContractType, _fileName: string) => {
       const steps: AnalysisStep[] = [
-        { id: "parsing",    label: "Document Parsing",  description: "Analyzing document structure",        status: "idle" },
-        { id: "extraction", label: "Clause Extraction", description: "Identifying key clauses",             status: "idle" },
-        { id: "risk",       label: "Risk Analysis",     description: "Evaluating risk levels",              status: "idle" },
-        { id: "report",     label: "Report Generation", description: "Synthesizing assessment report",      status: "idle" },
+        { id: "parsing", label: "Document Parsing", description: "Analyzing document structure", status: "idle" },
+        { id: "extraction", label: "Clause Extraction", description: "Identifying key clauses", status: "idle" },
+        { id: "risk", label: "Risk Analysis", description: "Evaluating risk levels", status: "idle" },
+        { id: "report", label: "Report Generation", description: "Synthesizing assessment report", status: "idle" },
       ];
 
       const progressMsgId = genId();
@@ -320,13 +451,14 @@ export default function ChatPage() {
           conversation_id: convId,
           user_type: userType,
           contract_type: contractType,
+          model: selectedModel,
         }, abortControllerRef.current.signal)) {
           const ev = event.event as string;
           const data = event.data as Record<string, unknown>;
 
           if (ev === "steps_init") {
             // Backend sent canonical step list — use it
-            const backendSteps = data.steps as Array<{id: string; label: string; description: string}>;
+            const backendSteps = data.steps as Array<{ id: string; label: string; description: string }>;
             const fresh = backendSteps.map((s) => ({ ...s, status: "idle" as const }));
             updateMessage(convId, progressMsgId, { analysisSteps: fresh });
           } else if (ev === "step_update") {
@@ -353,9 +485,9 @@ export default function ChatPage() {
             }
           } else if (ev === "done") {
             const contractReport = parseBackendReport(data.risk_analysis, contractType);
-            updateMessage(convId, reportMsgId, { 
-              isStreaming: false, 
-              report: contractReport 
+            updateMessage(convId, reportMsgId, {
+              isStreaming: false,
+              report: contractReport
             });
             updateConversation(convId, (c) => ({ ...c, contractType }));
           } else if (ev === "error") {
@@ -377,7 +509,7 @@ export default function ChatPage() {
         } else {
           addMessage(convId, {
             id: genId(), role: "assistant",
-            content: `⚠️ Failed to connect to analysis service. Please ensure the backend is running.\n\n\`\`\`\n${err}\n\`\`\``,
+            content: getErrorMessage(err),
             timestamp: new Date(),
           });
         }
@@ -386,7 +518,7 @@ export default function ChatPage() {
         abortControllerRef.current = null;
       }
     },
-    [addMessage, updateMessage, updateConversation, userType]
+    [addMessage, updateMessage, updateConversation, userType, selectedModel]
   );
 
   // ── Handle pending analysis (from Benchmarks page) ──────────
@@ -395,14 +527,14 @@ export default function ChatPage() {
     if (pending) {
       localStorage.removeItem("fortress_pending_analysis");
       const { title, content } = JSON.parse(pending);
-      
+
       const startPending = async () => {
         try {
           const api = await conversationsApi.create({ title });
           const conv = apiConvToLocal(api);
           setConversations((prev) => [conv, ...prev]);
           setActiveConversationId(conv.id);
-          
+
           // Add user message
           addMessage(conv.id, {
             id: genId(), role: "user", content: `Analyze this CUAD contract: ${title}\n\n${content.slice(0, 500)}...`,
@@ -481,8 +613,9 @@ export default function ChatPage() {
         const resp = await chatApi.send({
           message: `I want to analyze a ${CONTRACT_TYPE_LABELS[type]}.`,
           conversation_id: convId,
-          userType,
+          user_type: userType,
           contract_type: type,
+          model: selectedModel,
         });
         addMessage(convId, apiMsgToLocal(resp.message));
       } catch {
@@ -496,7 +629,7 @@ export default function ChatPage() {
         }, 600);
       }
     },
-    [activeConversationId, addMessage, userType]
+    [activeConversationId, addMessage, userType, selectedModel]
   );
 
   // ── Handle chat message send (handles both text and files) ──
@@ -506,23 +639,25 @@ export default function ChatPage() {
       const firstFile = files?.[0];
       const title = firstFile ? firstFile.name.replace(/\.[^/.]+$/, "").slice(0, 35) : (content.slice(0, 50) || "New Analysis");
 
-      if (!convId) {
-        try {
-          const api = await conversationsApi.create({ title });
-          const conv = apiConvToLocal(api);
-          setConversations((prev) => [conv, ...prev]);
-          setActiveConversationId(conv.id);
-          convId = conv.id;
-        } catch {
-          const newConv: Conversation = {
-            id: genId(), title, lastMessage: "", timestamp: new Date(), messages: [],
-          };
-          setConversations((prev) => [newConv, ...prev]);
-          setActiveConversationId(newConv.id);
-          convId = newConv.id;
-        }
-      } else if (firstFile) {
+      try {
+        convId = await ensureBackendConversation(convId, title);
+      } catch (err) {
+        const fallbackConvId = convId ?? chatId;
+        addMessage(fallbackConvId, {
+          id: genId(),
+          role: "assistant",
+          content: `Unable to start a backend conversation.\n\n${err instanceof Error ? err.message : String(err)}`,
+          timestamp: new Date(),
+        });
+        return;
+      }
+
+      const currentConv = conversations.find(c => c.id === convId);
+      const isFirstMessage = !currentConv?.messages || currentConv.messages.length === 0;
+
+      if (isFirstMessage || firstFile) {
         updateConversation(convId, (c) => ({ ...c, title }));
+        conversationsApi.update(convId, { title }).catch(err => console.warn("Backend rename failed:", err));
       }
 
       if (files && files.length > 0) {
@@ -605,8 +740,13 @@ export default function ChatPage() {
       const assistantMsgId = genId();
       let accumulated = "";
 
+      // Eagerly add the empty assistant message to show the "thinking" state immediately
+      addMessage(convId!, {
+        id: assistantMsgId, role: "assistant",
+        content: "", timestamp: new Date(), isStreaming: true,
+      });
+
       try {
-        let started = false;
         abortControllerRef.current = new AbortController();
 
         for await (const event of chatApi.stream({
@@ -614,23 +754,14 @@ export default function ChatPage() {
           conversation_id: convId,
           user_type: userType,
           contract_type: activeConversation?.contractType,
+          model: selectedModel,
         }, abortControllerRef.current.signal)) {
           const ev = event.event as string;
 
           if (ev === "start") {
-            addMessage(convId!, {
-              id: assistantMsgId, role: "assistant",
-              content: "", timestamp: new Date(), isStreaming: true,
-            });
-            started = true;
+            // We already added the message, so we just continue
+            continue;
           } else if (ev === "chunk") {
-            if (!started) {
-              addMessage(convId!, {
-                id: assistantMsgId, role: "assistant",
-                content: "", timestamp: new Date(), isStreaming: true,
-              });
-              started = true;
-            }
             accumulated += (event.content as string) ?? "";
             updateMessage(convId!, assistantMsgId, {
               content: accumulated,
@@ -647,24 +778,28 @@ export default function ChatPage() {
         }
       } catch (err: any) {
         if (err.name === 'AbortError' || err.message.includes('abort')) {
-           updateMessage(convId!, assistantMsgId, {
-              isStreaming: false,
-           });
+          updateMessage(convId!, assistantMsgId, {
+            isStreaming: false,
+          });
         } else {
+          updateMessage(convId!, assistantMsgId, { isStreaming: false });
           addMessage(convId!, {
             id: genId(), role: "assistant",
-            content: `⚠️ Connection error. Is the backend running?\n\n\`${err}\``,
+            content: getErrorMessage(err),
             timestamp: new Date(),
           });
         }
       } finally {
         setIsStreaming(false);
+        if (assistantMsgId) {
+          updateMessage(convId!, assistantMsgId, { isStreaming: false });
+        }
         abortControllerRef.current = null;
       }
     },
     [
       activeConversationId, addMessage, updateMessage, updateConversation,
-      userType, activeConversation, registerFile, runAnalysis
+      userType, activeConversation, registerFile, runAnalysis, ensureBackendConversation, chatId, selectedModel
     ]
   );
 
@@ -708,17 +843,27 @@ export default function ChatPage() {
 
   // ── Rename conversation ─────────────────────────────────────
   const handleRename = useCallback(
-    async (id: string, currentName: string) => {
-      const newName = prompt("Edit Chat Name", currentName);
-      if (!newName?.trim()) return;
-      updateConversation(id, (c) => ({ ...c, title: newName.trim() }));
+    (id: string, currentName: string) => {
+      setRenameChatId(id);
+      setRenameChatName(currentName);
+      setIsRenameModalOpen(true);
+    },
+    []
+  );
+
+  const handleConfirmRename = useCallback(
+    async () => {
+      if (!renameChatId || !renameChatName.trim()) return;
+      const trimmedName = renameChatName.trim();
+      updateConversation(renameChatId, (c) => ({ ...c, title: trimmedName }));
+      setIsRenameModalOpen(false);
       try {
-        await conversationsApi.update(id, { title: newName.trim() });
+        await conversationsApi.update(renameChatId, { title: trimmedName });
       } catch (err) {
         console.warn("Backend rename failed:", err);
       }
     },
-    [updateConversation]
+    [renameChatId, renameChatName, updateConversation]
   );
 
   // ── Pin/Unpin conversation ──────────────────────────────────
@@ -745,8 +890,74 @@ export default function ChatPage() {
     return b.timestamp.getTime() - a.timestamp.getTime();
   });
 
+  const activeOption = MODEL_OPTIONS[modelMode];
+
+  const modelSelector = (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setIsModelDropdownOpen((prev) => !prev)}
+        className="flex items-center gap-2 px-3 py-1 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] transition-all text-left min-w-[120px]"
+        aria-label="Select model mode"
+      >
+        <div className="flex-1">
+          <span className="block text-[11px] font-bold text-secondary leading-none">
+            {activeOption.label}
+          </span>
+          <span className="block text-[9px] text-muted-foreground leading-tight mt-0.5">
+            Gemini {activeOption.detail}
+          </span>
+        </div>
+        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 ${isModelDropdownOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      <AnimatePresence>
+        {isModelDropdownOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 mt-1.5 w-44 rounded-xl border border-white/10 bg-surface/90 backdrop-blur-xl p-1 shadow-[0_10px_30px_rgba(0,0,0,0.3)] z-[50]"
+          >
+            {(Object.entries(MODEL_OPTIONS) as Array<[ModelMode, typeof MODEL_OPTIONS[ModelMode]]>).map(([mode, option]) => {
+              const isActive = modelMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setModelMode(mode);
+                    setIsModelDropdownOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-left transition-colors ${
+                    isActive
+                      ? "bg-primary text-white shadow-sm"
+                      : "text-muted-foreground hover:bg-white/5 hover:text-secondary"
+                  }`}
+                >
+                  <div>
+                    <span className={`block text-[11px] font-bold leading-none ${isActive ? "text-white" : "text-secondary"}`}>
+                      {option.label}
+                    </span>
+                    <span className={`block text-[9px] leading-tight mt-0.5 ${isActive ? "text-white/80" : "text-muted-foreground"}`}>
+                      Gemini {option.detail}
+                    </span>
+                  </div>
+                  {isActive && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
+                  )}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+
   return (
-    <div 
+    <div
       className="flex h-full min-h-screen overflow-hidden relative"
       onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
       onDragLeave={() => setIsDragging(false)}
@@ -760,13 +971,13 @@ export default function ChatPage() {
       {/* Drag Overlay */}
       <AnimatePresence>
         {isDragging && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-[100] bg-surface/40 backdrop-blur-[20px] flex items-center justify-center transition-all"
           >
-            <motion.div 
+            <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -774,10 +985,10 @@ export default function ChatPage() {
             >
               {/* Background Glow */}
               <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
-              
+
               <div className="relative">
-                <motion.div 
-                  animate={{ 
+                <motion.div
+                  animate={{
                     scale: [1, 1.2, 1],
                     opacity: [0.3, 0.1, 0.3],
                     rotate: [0, 90, 180, 270, 360]
@@ -785,12 +996,12 @@ export default function ChatPage() {
                   transition={{ repeat: Infinity, duration: 8, ease: "linear" }}
                   className="absolute -inset-12 bg-primary/20 rounded-full blur-[60px]"
                 />
-                
+
                 <div className="relative w-24 h-24 rounded-[32px] bg-primary/10 border border-primary/30 flex items-center justify-center shadow-[inset_0_0_20px_rgba(24,86,255,0.1)] group-hover:scale-110 transition-transform duration-500">
                   <Upload className="w-12 h-12 text-primary animate-bounce" />
                 </div>
               </div>
-              
+
               <div className="text-center relative z-10">
                 <h3 className="text-3xl font-extrabold text-secondary mb-3 tracking-tight">
                   Ready to Analyze
@@ -847,6 +1058,9 @@ export default function ChatPage() {
 
         {!hasMessages ? (
           <>
+            <div className="absolute right-4 top-4 z-20">
+              {modelSelector}
+            </div>
             <EmptyState onUpload={(file) => handleAttachFiles([file])} onContractTypeHint={handleContractTypeHint} />
             <ChatInput
               onSend={handleSend}
@@ -876,10 +1090,11 @@ export default function ChatPage() {
                 {activeConversation?.title}
               </h2>
               {contractType && (
-                <span className="ml-3 text-[9px] font-mono text-primary/80 bg-primary/10 px-2 py-0.5 rounded-md border border-primary/15">
+                <span className="text-[9px] font-mono text-primary/80 bg-primary/10 px-2 py-0.5 rounded-md border border-primary/15">
                   {CONTRACT_TYPE_LABELS[contractType]}
                 </span>
               )}
+              {modelSelector}
               <div className="ml-auto flex items-center gap-3">
                 {isStreaming && (
                   <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold text-primary uppercase tracking-wider">
@@ -900,6 +1115,7 @@ export default function ChatPage() {
                     message={msg}
                     userType={userType}
                     onRequestExport={handleExportRequest}
+                    onSearchClick={(query) => setActiveSearchQuery(query)}
                   />
                 ))}
                 <div ref={messagesEndRef} />
@@ -921,6 +1137,95 @@ export default function ChatPage() {
           </>
         )}
       </main>
+
+      {/* Right Sidebar for Search Results */}
+      <AnimatePresence mode="wait">
+        {activeSearchQuery && (
+          <SearchResultsPanel
+            query={activeSearchQuery}
+            onClose={() => setActiveSearchQuery(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Edit Chat Name Modal */}
+      {mounted && createPortal(
+        <AnimatePresence>
+          {isRenameModalOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+              {/* Overlay Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="absolute inset-0 bg-black/60 backdrop-blur-md"
+                onClick={() => setIsRenameModalOpen(false)}
+              />
+              
+              {/* Modal Container */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                transition={{ type: "spring", duration: 0.35, bounce: 0.15 }}
+                className="relative z-10 w-full max-w-md bg-surface/95 border border-white/10 rounded-2xl p-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] backdrop-blur-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Visual Accent Glow */}
+                <div className="absolute -top-12 -left-12 w-24 h-24 bg-primary/10 rounded-full blur-2xl pointer-events-none" />
+
+                {/* Header */}
+                <div className="mb-4">
+                  <h3 className="text-lg font-bold text-secondary flex items-center gap-2">
+                    Rename Conversation
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Enter a new title for this risk analysis chat.
+                  </p>
+                </div>
+
+                {/* Body / Input */}
+                <div className="mb-6">
+                  <input
+                    type="text"
+                    value={renameChatName}
+                    onChange={(e) => setRenameChatName(e.target.value)}
+                    placeholder="E.g., NDA Review"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        handleConfirmRename();
+                      } else if (e.key === "Escape") {
+                        setIsRenameModalOpen(false);
+                      }
+                    }}
+                    className="w-full px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-secondary placeholder-muted-foreground/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all text-sm font-medium"
+                  />
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => setIsRenameModalOpen(false)}
+                    className="px-4 py-2 rounded-lg font-medium text-xs text-muted-foreground hover:text-secondary bg-transparent border border-white/10 hover:bg-white/5 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmRename}
+                    disabled={!renameChatName.trim()}
+                    className="px-4 py-2 rounded-lg font-medium text-xs text-white bg-primary hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(24,86,255,0.3)] transition-all"
+                  >
+                    Rename
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }

@@ -28,7 +28,6 @@ docker-compose.yml
 scratch
 uploads
 .env.local
-qdrant_storage/
 postgres_data/
 redis_data/
 **/__pycache__

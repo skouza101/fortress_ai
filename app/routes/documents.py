@@ -18,7 +18,8 @@ async def upload_batch(
     
     tasks = []
     for file in files:
-        file_path = os.path.join(settings.upload_path, file.filename)
+        safe_filename = os.path.basename(file.filename) if file.filename else "upload.bin"
+        file_path = os.path.join(settings.upload_path, safe_filename)
         with open(file_path, "wb") as buffer:
             buffer.write(await file.read())
         

@@ -12,6 +12,8 @@ datasource db {
 model User {
   id            String         @id @default(uuid())
   email         String         @unique
+  name          String?
+  userType      String?
   passwordHash  String?
   createdAt     DateTime       @default(now())
   conversations Conversation[]
@@ -36,6 +38,7 @@ model Message {
   id             String       @id @default(uuid())
   role           String
   content        String
+  report         Json?
   timestamp      DateTime     @default(now())
   conversationId String
   attachment     Attachment?
@@ -64,4 +67,20 @@ model DocumentTask {
   updatedAt    DateTime @updatedAt
   userId       String?
   user         User?    @relation(fields: [userId], references: [id])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  email     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  email     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }

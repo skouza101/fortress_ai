@@ -1,8 +1,5 @@
-import asyncio
 import logging
 from typing import List, Dict, Any
-from qdrant_client import AsyncQdrantClient
-from fastembed import TextEmbedding
 import httpx
 
 from app.core.config import settings
@@ -13,43 +10,14 @@ logger = logging.getLogger(__name__)
 
 class HybridResearcher:
     def __init__(self):
-        self.qdrant_client = AsyncQdrantClient(url=settings.QDRANT_URL)
-        self.collection_name = settings.QDRANT_COLLECTION
-        self._model = None
         self.tavily_api_key = settings.TAVILY_API_KEY
         # For this implementation, I'll use the existing SearchService logic for Tavily
         self.tavily_url = "https://api.tavily.com/search"
 
-    @property
-    def model(self):
-        if self._model is None:
-            self._model = TextEmbedding(model_name=settings.EMBEDDING_MODEL)
-        return self._model
-
     async def search_internal(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Search internal Qdrant vector store."""
-        try:
-            # Generate embedding
-            query_vector = list(self.model.embed([query]))[0].tolist()
-            
-            search_result = await self.qdrant_client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=limit
-            )
-            
-            return [
-                {
-                    "content": hit.payload.get("content", ""),
-                    "source": hit.payload.get("filename", "Internal Doc"),
-                    "score": hit.score,
-                    "type": "internal"
-                }
-                for hit in search_result
-            ]
-        except Exception as e:
-            logger.error(f"Internal search failed: {e}")
-            return []
+        """Internal vector search is disabled while Qdrant is not deployed."""
+        logger.info("Internal vector search skipped; Qdrant is disabled.")
+        return []
 
     async def search_web(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Search web using Tavily."""
@@ -98,11 +66,8 @@ class HybridResearcher:
         query = state.get("query") or state.get("original_query")
         logger.info(f"HybridResearcher: Searching for '{query}'")
 
-        # Run both searches in parallel
-        internal_task = self.search_internal(query)
-        web_task = self.search_web(query)
-        
-        internal_results, web_results = await asyncio.gather(internal_task, web_task)
+        internal_results = await self.search_internal(query)
+        web_results = await self.search_web(query)
         
         # Merge and remove duplicates (simple content-based deduplication)
         seen_content = set()
@@ -117,7 +82,7 @@ class HybridResearcher:
                 sources.append({"title": res.get("title", res["source"]), "url": res["source"]})
 
         # Format context for the next agent
-        context_str = "\n\n".join([
+        research_context = "\n\n".join([
             f"SOURCE: {res['source']}\n"
             f"TYPE: {res.get('type', 'unknown')}\n"
             f"CONTENT: {res['content']}"
@@ -126,25 +91,70 @@ class HybridResearcher:
 
         document_structure = state.get("document_structure")
         if document_structure:
-            context_str = f"DOCUMENT STRUCTURE:\n{document_structure}\n\n{context_str}"
+            research_context = f"DOCUMENT STRUCTURE:\n{document_structure}\n\n{research_context}"
 
         # Generate a research summary report
-        summary_prompt = f"""
-        Analyze the following research results for the query: "{query}"
+        summary_prompt = f"""You are a Senior Legal Research Analyst synthesizing findings for a contract risk assessment.
+
+---
+
+## RESEARCH QUERY
+"{query}"
+
+## RAW RESEARCH DATA
+{research_context}
+
+---
+
+## YOUR TASK
+
+Analyze the research results above and produce a structured **Legal Research Brief** that will be consumed by a downstream Risk Analyst agent. Your output must be directly actionable — not a summary of summaries.
+
+### Required Sections
+
+**1. Key Legal Precedents**
+- Cite specific cases, rulings, or regulatory decisions that are directly relevant
+- Note the jurisdiction and year when available
+- Explain how each precedent applies to the contract under review
+
+**2. Applicable Regulations & Standards**
+- List specific statutes, regulations, or industry standards (e.g., UCC Article 2, GDPR Article 28)
+- Note compliance requirements that the contract should satisfy
+- Flag any recent regulatory changes that affect enforceability
+
+**3. Industry Benchmarks**
+- What are standard market terms for the key clauses in question?
+- Provide specific ranges or thresholds (e.g., "standard indemnification caps are typically 1-2x annual contract value")
+- Note any deviation from market norms found in the research
+
+**4. Risk Indicators**
+- Highlight specific red flags or risk patterns identified in the research
+- Note any enforcement trends or common dispute areas
+- Flag jurisdiction-specific risks if applicable
+
+**5. Source Reliability Assessment**
+- Rate the quality and recency of the sources (High/Medium/Low confidence)
+- Note any conflicting information between sources
+- Identify gaps where additional research may be needed
+
+---
+
+## FORMAT RULES
+- Be precise and cite specific sources by name/URL
+- Use bullet points for scanability
+- Prioritize findings by relevance to the original query
+- Keep total output under 1500 words — density over volume"""
         
-        RESULTS:
-        {context_str}
-        
-        Provide a concise research report highlighting key legal precedents, regulations, and findings.
-        """
-        
-        research_report = await generate(summary_prompt, system_prompt="You are a meticulous legal researcher.")
+        research_report = await generate(
+            summary_prompt,
+            system_prompt="You are a meticulous legal researcher with expertise in contract law, regulatory compliance, and legal precedent analysis. You produce precise, well-sourced research briefs for senior legal analysts. Never fabricate citations.",
+            model=state.get("model"),
+        )
 
         return {
             **state,
             "internal_docs": internal_results,
             "web_results": web_results,
-            "merged_context": context_str,
             "sources": sources,
             "research_report": research_report
         }
