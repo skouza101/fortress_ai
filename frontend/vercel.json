@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path((?!auth(?:/|$)).*)",
-      "destination": "https://<your-backend-url>/api/:path"
+      "destination": "https://fortress-ai-e8234f8ade8f.herokuapp.com/api/:path"
     }
   ]
 }
