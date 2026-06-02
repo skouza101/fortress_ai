@@ -85,7 +85,7 @@ graph TD
 ```
 
 ### 🧠 The Audit Pipeline
-The system follows a 4-node "Chain of Thought" process orchestrated by **LangGraph**:
+The system follows a 4-node "Chain of Thought" process orchestrated by **LangGraph**:   
 
 1.  🔍 **Extraction Node**: Converts unstructured PDFs/Docs into clean legal primitives (parties, dates, clauses).
 2.  📚 **Research Node**: Performs semantic search against the **Qdrant** store for precedents and statutory context.
