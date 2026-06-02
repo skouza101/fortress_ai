@@ -6,7 +6,7 @@
 [![ROCm](https://img.shields.io/badge/ROCm-ED1C24?style=for-the-badge&logo=amd&logoColor=white)](https://www.amd.com/en/graphics/servers-solutions-rocm)
 
 **Fortress AI** is a private, high-performance, multi-agent legal audit system designed to run on **AMD MI300X** servers. It leverages the latest in ROCm-accelerated inference to provide a secure "Command Center" for complex legal document analysis.
-
+  
 ---
 
 ## 🚀 Key Features
