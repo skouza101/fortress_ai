@@ -66,17 +66,61 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
     return "low";
   };
 
+  const rawFindings = Array.isArray(safeData.findings) ? safeData.findings : [];
   const rawRedFlags = Array.isArray(safeData.red_flags) ? safeData.red_flags : [];
   const rawPenalties = Array.isArray(safeData.penalties) ? safeData.penalties : [];
   const rawObligations = Array.isArray(safeData.obligations) ? safeData.obligations : [];
 
-  const parsedRedFlags: RedFlag[] = rawRedFlags.map((rf: any, i: number) => ({
-    id: `rf-${i}`,
-    title: rf.issue || "Identified Risk",
-    description: rf.description || "Potential liability or violation found.",
-    section: rf.section || "General",
-    severity: mapSeverityToRiskLevel(rf.severity),
-  }));
+  const normalizeSection = (value: unknown): string => {
+    const text = String(value || "").trim();
+    if (!text || /^general$/i.test(text)) return "Unknown";
+    return text;
+  };
+
+  const isPlaceholderFinding = (f: any): boolean => {
+    const title = String(f?.title || "").trim().toLowerCase();
+    const justification = String(f?.justification || "").trim().toLowerCase();
+    const section = normalizeSection(f?.section).toLowerCase();
+    if (section !== "unknown") return false;
+
+    if (title === "obligation" || title === "risk issue" || title === "identified risk") {
+      return true;
+    }
+
+    if (justification === "potential liability or violation found." || justification === "") {
+      return true;
+    }
+
+    return false;
+  };
+
+  const usableFindings = rawFindings.filter((f: any) => !isPlaceholderFinding(f));
+
+  const parsedRedFlags: RedFlag[] = usableFindings
+    .filter((f: any) => {
+      const level = mapSeverityToRiskLevel(f.risk || f.severity || "");
+      return level === "high" || level === "critical";
+    })
+    .map((f: any, i: number) => ({
+      id: `rf-${i}`,
+      title: f.title || "Identified Risk",
+      description: f.justification || f.description || "Potential liability or violation found.",
+      section: normalizeSection(f.section),
+      severity: mapSeverityToRiskLevel(f.risk || f.severity),
+    }));
+
+  // Backward compatibility: if no findings are available, use legacy red_flags array.
+  if (parsedRedFlags.length === 0 && usableFindings.length === 0) {
+    parsedRedFlags.push(
+      ...rawRedFlags.map((rf: any, i: number) => ({
+        id: `rf-${i}`,
+        title: rf.issue || "Identified Risk",
+        description: rf.description || "Potential liability or violation found.",
+        section: normalizeSection(rf.section),
+        severity: mapSeverityToRiskLevel(rf.severity),
+      }))
+    );
+  }
 
   const parsedRiskMatrix = {
     critical: [] as RiskItem[],
@@ -85,45 +129,62 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
     low: [] as RiskItem[],
   };
 
-  // Convert penalties & obligations into RiskMatrix items
+  // Prefer structured findings from backend.
   let itemCounter = 0;
-  [...rawPenalties, ...rawObligations].forEach((item: any) => {
-    const isPenalty = "impact" in item;
-    const level = mapSeverityToRiskLevel(item.severity || "medium");
+  usableFindings.forEach((item: any) => {
+    const level = mapSeverityToRiskLevel(item.risk || item.severity || "medium");
     const riskItem: RiskItem = {
       id: `ri-${itemCounter++}`,
-      clause: isPenalty ? item.type || "Penalty" : item.task || "Obligation",
-      section: item.deadline ? `Deadline: ${item.deadline}` : "General",
+      clause: item.title || item.issue || item.task || "Risk Issue",
+      section: normalizeSection(item.section),
       level,
-      description: isPenalty ? item.impact : item.description,
+      description: item.justification || item.description || item.impact || "Potential liability or violation found.",
+      page: item.page,
+      contract_text: item.contract_text,
+      recommendation: item.recommendation,
+      priority: item.priority,
+      related_sections: Array.isArray(item.related_sections) ? item.related_sections : undefined,
+      clause_type: item.clause_type,
     };
-    
+
     if (level === "critical") parsedRiskMatrix.critical.push(riskItem);
     else if (level === "high") parsedRiskMatrix.high.push(riskItem);
     else if (level === "medium") parsedRiskMatrix.medium.push(riskItem);
     else parsedRiskMatrix.low.push(riskItem);
   });
 
-  // Add red flags to high/critical as well if needed, but let's keep them separate to fit UI.
-  // Actually, UI renders all items in the matrix. Let's add red flags to high/critical.
-  rawRedFlags.forEach((rf: any) => {
-    const level = mapSeverityToRiskLevel(rf.severity);
-    const riskItem: RiskItem = {
-      id: `ri-${itemCounter++}`,
-      clause: rf.issue || "Risk Issue",
-      section: rf.section || "General",
-      level,
-      description: rf.description,
-    };
-    if (level === "critical" || level === "high") parsedRiskMatrix.high.push(riskItem);
-    else if (level === "medium") parsedRiskMatrix.medium.push(riskItem);
-    else parsedRiskMatrix.low.push(riskItem);
-  });
+  // Backward compatibility when findings are absent.
+  if (usableFindings.length === 0) {
+    [...rawPenalties, ...rawObligations, ...rawRedFlags].forEach((item: any) => {
+      const level = mapSeverityToRiskLevel(item.severity || "medium");
+      const riskItem: RiskItem = {
+        id: `ri-${itemCounter++}`,
+        clause: item.title || item.issue || item.type || item.task || "Risk Issue",
+        section: normalizeSection(item.section || (item.deadline ? `Deadline: ${item.deadline}` : "Unknown")),
+        level,
+        description: item.justification || item.description || item.impact || "Potential liability or violation found.",
+      };
+
+      if (level === "critical") parsedRiskMatrix.critical.push(riskItem);
+      else if (level === "high") parsedRiskMatrix.high.push(riskItem);
+      else if (level === "medium") parsedRiskMatrix.medium.push(riskItem);
+      else parsedRiskMatrix.low.push(riskItem);
+    });
+  }
 
   // Calculate verdict based on red flags
   const verdict = parsedRedFlags.length > 2 || parsedRiskMatrix.high.length > 2 
     ? "SEEK_COUNSEL" 
     : parsedRedFlags.length > 0 ? "NEGOTIATE" : "SIGN";
+
+  const topFinding = usableFindings[0];
+  const recForAttorneys = topFinding?.recommendation
+    ? `Prioritize revisions for ${normalizeSection(topFinding.section)} and validate enforceability of the proposed changes.`
+    : "Review the identified high-severity clauses and ensure indemnification caps are appropriate.";
+
+  const recForIndividuals = topFinding?.recommendation
+    ? topFinding.recommendation
+    : "Consider asking for clarification on the highlighted red flags before signing.";
 
   return {
     verdict,
@@ -134,8 +195,8 @@ function parseBackendReport(riskAnalysis: any, contractType?: ContractType): Con
     recommendations: [
       {
         id: "rec-1",
-        forAttorneys: "Review the identified high-severity clauses and ensure indemnification caps are appropriate.",
-        forIndividuals: "Consider asking for clarification on the highlighted red flags before signing.",
+        forAttorneys: recForAttorneys,
+        forIndividuals: recForIndividuals,
       }
     ],
     appendix: {
@@ -348,11 +409,22 @@ export default function ChatPage() {
               updateMessage(convId, reportMsgId, { content: reportContent, isStreaming: true });
             }
           } else if (ev === "done") {
-            const contractReport = parseBackendReport(data.risk_analysis, contractType);
-            updateMessage(convId, reportMsgId, { 
-              isStreaming: false, 
-              report: contractReport 
-            });
+            const riskAnalysis = data.risk_analysis as any;
+            const backendReport = typeof data.report === "string" ? data.report : "";
+            const hasStructuredFindings = Array.isArray(riskAnalysis?.findings) && riskAnalysis.findings.length > 0;
+
+            if (hasStructuredFindings) {
+              const contractReport = parseBackendReport(riskAnalysis, contractType);
+              updateMessage(convId, reportMsgId, {
+                isStreaming: false,
+                report: contractReport,
+              });
+            } else {
+              updateMessage(convId, reportMsgId, {
+                content: backendReport || reportContent || "Analysis completed, but no structured report was returned.",
+                isStreaming: false,
+              });
+            }
             updateConversation(convId, (c) => ({ ...c, contractType }));
           } else if (ev === "error") {
             const errMsg = data.message as string;
@@ -472,15 +544,56 @@ export default function ChatPage() {
         timestamp: new Date(),
       });
 
-      // Send to backend for a real response
+      // Stream response so users see partial output immediately.
       try {
-        const resp = await chatApi.send({
+        setIsStreaming(true);
+        const assistantMsgId = genId();
+        let accumulated = "";
+        let started = false;
+        abortControllerRef.current = new AbortController();
+
+        for await (const event of chatApi.stream({
           message: `I want to analyze a ${CONTRACT_TYPE_LABELS[type]}.`,
           conversation_id: convId,
-          userType,
+          user_type: userType,
           contract_type: type,
-        });
-        addMessage(convId, apiMsgToLocal(resp.message));
+        }, abortControllerRef.current.signal)) {
+          const ev = event.event as string;
+
+          if (ev === "start") {
+            addMessage(convId!, {
+              id: assistantMsgId,
+              role: "assistant",
+              content: "",
+              timestamp: new Date(),
+              isStreaming: true,
+            });
+            started = true;
+          } else if (ev === "chunk") {
+            if (!started) {
+              addMessage(convId!, {
+                id: assistantMsgId,
+                role: "assistant",
+                content: "",
+                timestamp: new Date(),
+                isStreaming: true,
+              });
+              started = true;
+            }
+            accumulated += (event.content as string) ?? "";
+            updateMessage(convId!, assistantMsgId, {
+              content: accumulated,
+              isStreaming: true,
+            });
+          } else if (ev === "done") {
+            updateMessage(convId!, assistantMsgId, { isStreaming: false });
+          } else if (ev === "error") {
+            updateMessage(convId!, assistantMsgId, {
+              content: `⚠️ ${event.message as string}`,
+              isStreaming: false,
+            });
+          }
+        }
       } catch {
         // Fallback local message
         setTimeout(() => {
@@ -490,9 +603,12 @@ export default function ChatPage() {
             timestamp: new Date(),
           });
         }, 600);
+      } finally {
+        setIsStreaming(false);
+        abortControllerRef.current = null;
       }
     },
-    [activeConversationId, addMessage, userType]
+    [activeConversationId, addMessage, userType, updateMessage]
   );
 
   // ── Handle chat message send (handles both text and files) ──

@@ -9,29 +9,26 @@ class Orchestrator:
         """Route the query and decide on data sources."""
         logger.info(f"Orchestrator: Routing query '{state['query']}'")
 
-        prompt = f"""
-        You are the Manager Agent for Fortress AI. Your job is to analyze the user's legal query 
-        and decide on the best research strategy.
+        # CRITICAL: Use directive style to prevent reasoning loops
+        prompt = f"""Query: {state['query']}
 
-        QUERY: {state['query']}
+Output JSON with these exact keys:
+- optimized_query: Rewrite query for search (string)
+- strategy: Choose "INTERNAL" or "WEB" or "BOTH" (string)
+- reasoning: Brief explanation (string, max 50 words)
 
-        DECISION TASKS:
-        1. Rewrite the query for optimal vector and web search.
-        2. Decide if we need:
-           - INTERNAL: Search private legal documents in Qdrant.
-           - WEB: Search real-time legal web data via Tavily.
-           - BOTH: Recommended for most legal inquiries.
+Example:
+{{"optimized_query": "vendor agreement payment terms individual contractor", "strategy": "BOTH", "reasoning": "Legal query needs both internal precedents and current web standards"}}
 
-        OUTPUT FORMAT:
-        Return ONLY a JSON object:
-        {{
-            "optimized_query": "...",
-            "strategy": "INTERNAL | WEB | BOTH",
-            "reasoning": "..."
-        }}
-        """
+Your JSON:"""
 
-        response = await generate(prompt, system_prompt="You are a strategic legal orchestrator. Return JSON.")
+        response = await generate(
+            prompt,
+            system_prompt="Output valid JSON only. No explanations.",
+            temperature=0.1,
+            max_tokens=300,
+            json_mode=True
+        )
         
         # Simple extraction logic for the demo, can be improved with a proper parser
         import json

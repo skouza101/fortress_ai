@@ -98,19 +98,6 @@ export const conversationsApi = {
 // ─── Chat ─────────────────────────────────────────────────────
 
 export const chatApi = {
-  /** Non-streaming send */
-  send(data: {
-    message: string;
-    conversation_id?: string;
-    user_type?: string;
-    contract_type?: string;
-  }): Promise<{ message: ApiMessage; conversation_id: string }> {
-    return apiFetch("/api/chat", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  },
-
   /**
    * Streaming send — returns a ReadableStream of SSE events.
    * Yields parsed JSON objects from each `data:` line.

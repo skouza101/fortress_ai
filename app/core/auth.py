@@ -1,6 +1,7 @@
 import logging
 import jwt
-from fastapi import Depends, HTTPException, Security
+import os
+from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jwt import PyJWKClient
 
@@ -8,7 +9,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 jwks_client = PyJWKClient(settings.CLERK_JWKS_URL)
 
 def verify_clerk_token(token: str) -> str:
@@ -41,10 +42,23 @@ def verify_clerk_token(token: str) -> str:
         raise ValueError(f"Token validation failed: {str(e)}")
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Security(security)) -> str:
     """
     FastAPI dependency to authenticate the user and return their user_id.
+    Supports FORTRESS_BYPASS_AUTH=true to skip authentication for development.
     """
+    # Check if auth bypass is enabled
+    if os.getenv("FORTRESS_BYPASS_AUTH", "").lower() == "true":
+        logger.warning("AUTH BYPASS ENABLED - Authentication is disabled for development")
+        return "dev-user"
+
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     try:
         user_id = verify_clerk_token(credentials.credentials)
         return user_id

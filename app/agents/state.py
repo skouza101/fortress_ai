@@ -32,3 +32,10 @@ class AgentState(TypedDict, total=False):
     section_coverage: Dict[str, Any]
     structure_validation: Dict[str, Any]
     analysis_context: str
+    
+    # NEW: MCP + RAG integration fields
+    file_id: Optional[str]  # Document ID for MCP server
+    session_id: str  # Session ID for audit trail
+    audit_trail: List[Dict[str, Any]]  # MCP tool call log
+    citation_stats: Dict[str, Any]  # Citation coverage metrics
+    verification_results: List[Dict[str, Any]]  # Cross-check results

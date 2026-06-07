@@ -65,33 +65,40 @@ async def export_conversation(
 
 # ─── System prompt for conversational chat ───────────────────
 
-FORTRESS_SYSTEM_PROMPT = """**Role:** AI Legal Operations Manager (Orchestrator)
-**Objective:** You are the central brain of "Fortress AI," a legal contract analysis platform. Your goal is to coordinate a multi-agent workflow to identify legal risks, ensure compliance, and extract structured data from complex contracts.
+FORTRESS_SYSTEM_PROMPT = """You are Fortress AI, a legal contract risk analysis assistant.
 
-**Available Specialized Agents:**
-1. **Ingestion Specialist:** Uses Marker OCR to convert raw PDFs/Images into clean Markdown.
-2. **Knowledge Retriever:** Queries the Qdrant Vector Database for historical precedents and internal legal standards.
-3. **Legal Researcher:** Uses Tavily/Web Search to verify external laws, corporate entities, and latest regulations.
-4. **Risk Auditor:** Analyzes the final text to detect "trap clauses," financial liabilities, and high-risk terms.
+Rules:
+- Return only the final answer for the user. Never output chain-of-thought, hidden reasoning, or internal deliberation.
+- Never output tags or phrases like <think>, </think>, "Thinking Process", "Here's a thinking process", "Step 1", or similar.
+- Keep responses concise, professional, and actionable.
+- Use clean Markdown when helpful. Do not wrap tables in code fences.
+- Do not provide definitive legal advice; include a short disclaimer when legal conclusions are requested.
+- If the user asks for a downloadable report, provide:
+    [Download DOCX Report](/api/chat/export/{conversation_id}?format=docx)
+"""
 
-**Operational Protocol:**
-1. **Analyze Input:** Receive the contract data and determine if it needs OCR, Search, or immediate analysis.
-2. **Task Delegation:** Assign specific tasks to the agents above in a logical sequence (e.g., Ingestion -> Retrieval -> Research -> Audit).
-3. **Quality Control:** Review the output from each agent. If the information is incomplete or hallucinatory, send it back for a "Revision Cycle."
-4. **Final Synthesis:** Compile a professional, structured legal risk report for the end-user, highlighting "Critical," "Medium," and "Low" risks.
 
-**Technical Constraints:**
-- Outputs must be in structured JSON or clean Markdown for the MERN stack frontend.
-- When referencing laws, always prioritize facts retrieved from the Research Agent.
-- Maintain a strictly professional, neutral, and analytical tone.
-- **TABLES:** When providing comparisons, risk levels, or structured data, ALWAYS use standard Markdown tables.
-- **IMPORTANT:** DO NOT wrap tables in code blocks (triple backticks). Provide them as raw Markdown text so the system can style them properly.
-- **EXPORTS:** You can now provide PDF and DOCX versions of your analysis reports. When a user asks for a downloadable version or a file, provide a link in this format: `[Download DOCX Report](/api/chat/export/{conversation_id}?format=docx)`.
+def _sanitize_assistant_output(text: str) -> str:
+    """Remove chain-of-thought artifacts if the model leaks them."""
+    if not text:
+        return text
 
-When a user uploads a contract, guide them through the analysis process.
-When asked general legal questions, provide helpful context while noting you are an AI assistant.
+    cleaned = text
 
-You must NEVER provide definitive legal advice. Always include appropriate disclaimers."""
+    if "</think>" in cleaned:
+        tail = cleaned.rsplit("</think>", 1)[-1].strip()
+        if tail:
+            cleaned = tail
+
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+    # Fallback: if a reasoning header remains, keep only the final paragraph.
+    if re.search(r"thinking\s*process|here'?s\s+a\s+thinking\s+process", cleaned, flags=re.IGNORECASE):
+        blocks = [b.strip() for b in re.split(r"\n\s*\n", cleaned) if b.strip()]
+        if blocks:
+            cleaned = blocks[-1]
+
+    return cleaned.strip()
 
 
 # ─── Chat (non-streaming) ───────────────────────────────────
@@ -142,6 +149,7 @@ async def send_message(req: ChatRequest, user_id: str = Depends(get_current_user
         messages=messages,
         system_prompt=system,
     )
+    response_text = _sanitize_assistant_output(response_text)
 
     # Save assistant message
     assistant_msg_id = uuid.uuid4().hex[:12]
@@ -223,7 +231,7 @@ async def stream_message(req: ChatRequest, user_id: str = Depends(get_current_us
             return
 
         # Save the full response
-        complete_text = "".join(full_response)
+        complete_text = _sanitize_assistant_output("".join(full_response))
         await store.add_message(
             conversation_id=conv_id,
             user_id=user_id,
@@ -346,6 +354,11 @@ async def stream_audit(req: ChatRequest, user_id: str = Depends(get_current_user
 
 # ─── File Upload ─────────────────────────────────────────────
 
+@router.options("/upload")
+async def upload_options():
+    """Handle CORS preflight for upload endpoint."""
+    return Response(status_code=200)
+
 @router.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
@@ -383,12 +396,42 @@ async def upload_file(
     save_path.write_bytes(contents)
 
     extracted_text = await _extract_text(contents, file.content_type, file.filename)
+    
+    # NEW: MCP + RAG Integration for PDFs
+    mcp_metadata = {}
+    if file.content_type == "application/pdf":
+        try:
+            from app.services.mcp_integration import get_integration_service
+            integration = get_integration_service()
+            
+            result = await integration.process_uploaded_document(
+                file_id=file_id,
+                pdf_bytes=contents,
+                filename=file.filename or "document.pdf",
+                conversation_id=conversation_id
+            )
+            
+            if result["success"]:
+                mcp_metadata = {
+                    "mcp_registered": True,
+                    "chunks_created": result["chunks_created"],
+                    "indexed": result["indexed"],
+                    "sections": result["sections"],
+                    "pages": result["pages"]
+                }
+                logger.info(f"MCP integration successful for {file_id}: {mcp_metadata}")
+            else:
+                logger.warning(f"MCP integration failed for {file_id}: {result.get('error')}")
+        except Exception as e:
+            logger.warning(f"MCP integration error (non-fatal): {e}")
+            # Continue without MCP - existing flow still works
 
     attachment = {
         "id": file_id,
         "name": file.filename or "document",
         "size": len(contents),
         "type": file.content_type or "application/octet-stream",
+        **mcp_metadata  # Include MCP metadata if available
     }
 
     await store.add_message(
@@ -427,11 +470,12 @@ async def _extract_text(contents: bytes, content_type: str, filename: str | None
                 output_parts.append(parsed.text)
 
                 logger.info(
-                    "PDF parsed: %s | pages=%d | blocks=%d | tables=%d",
+                    "PDF parsed: %s | pages=%d | blocks=%d | tables=%d | sections=%d",
                     filename,
                     parsed.page_count,
                     len(parsed.blocks),
                     len(parsed.tables),
+                    len(parsed.sections),
                 )
 
                 return "\n".join(part for part in output_parts if part)

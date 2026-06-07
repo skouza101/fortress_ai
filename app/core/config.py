@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     LLM_TIMEOUT_SECONDS: int = 60
     LLM_MAX_RETRIES: int = 3
+    LLM_MAX_OUTPUT_TOKENS: int = 4096
 
     # ── Qdrant (future RAG) ──────────────────────────────────
     QDRANT_URL: str = "http://localhost:6333"

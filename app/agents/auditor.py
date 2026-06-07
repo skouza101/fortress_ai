@@ -22,7 +22,7 @@ class FinalAuditor:
         parsed_doc = state.get("parsed_document")
         sources = state.get("sources", [])
 
-        # Step 1: Validate structure references
+        # Step 1: Validate structure references (pure logic, no LLM)
         validation_errors = []
         coverage_metrics = {}
         
@@ -33,29 +33,12 @@ class FinalAuditor:
             if validation_errors:
                 logger.warning(f"Validation errors found: {validation_errors}")
         
-        # Step 2: Structure validation audit
-        validation_prompt = self._build_validation_prompt(
+        # Step 2: Generate report from template (no LLM calls - instant)
+        final_report = self._generate_template_report(
             risk_analysis,
-            parsed_doc,
             validation_errors,
-            coverage_metrics
-        )
-        validation_result = await generate(
-            validation_prompt,
-            system_prompt="You are a critical Legal Auditor focused on accuracy and completeness."
-        )
-
-        # Step 3: Final report with structure context
-        report_prompt = self._build_final_report_prompt(
-            risk_analysis,
-            parsed_doc,
-            validation_result,
             coverage_metrics,
             sources
-        )
-        final_report = await generate(
-            report_prompt,
-            system_prompt="You are a professional legal reporter creating actionable reports."
         )
 
         # Build structure context for state
@@ -63,7 +46,7 @@ class FinalAuditor:
 
         return {
             **state,
-            "audit_report": validation_result,
+            "audit_report": final_report,
             "final_report_md": final_report,
             "structure_validation": {
                 "errors": validation_errors,
@@ -71,6 +54,54 @@ class FinalAuditor:
                 "context": structure_context
             }
         }
+    
+    def _generate_template_report(
+        self,
+        risk_analysis: Dict,
+        validation_errors: List,
+        coverage_metrics: Dict,
+        sources: List
+    ) -> str:
+        """Generate report from template without LLM call."""
+        findings = risk_analysis.get("findings", [])
+        
+        report = "# Contract Risk Analysis Report\n\n"
+        report += "## Executive Summary\n\n"
+        report += f"**Total Findings:** {len(findings)}\n\n"
+        
+        # Group by risk level
+        high_risk = [f for f in findings if f.get("risk", "").lower() == "high"]
+        medium_risk = [f for f in findings if f.get("risk", "").lower() == "medium"]
+        low_risk = [f for f in findings if f.get("risk", "").lower() == "low"]
+        
+        report += f"- **High Risk:** {len(high_risk)}\n"
+        report += f"- **Medium Risk:** {len(medium_risk)}\n"
+        report += f"- **Low Risk:** {len(low_risk)}\n\n"
+        
+        report += "## Findings\n\n"
+        for i, finding in enumerate(findings, 1):
+            report += f"### {i}. {finding.get('title', 'Untitled')}\n\n"
+            report += f"- **Section:** {finding.get('section', 'N/A')}\n"
+            report += f"- **Page:** {finding.get('page', 'N/A')}\n"
+            report += f"- **Risk Level:** {finding.get('risk', 'Medium')}\n"
+            report += f"- **Issue:** {finding.get('justification', '')}\n"
+            report += f"- **Recommendation:** {finding.get('recommendation', '')}\n\n"
+            
+            if finding.get('contract_text'):
+                report += f"**Contract Language:**\n> {finding['contract_text']}\n\n"
+        
+        if validation_errors:
+            report += "## Validation Notes\n\n"
+            for error in validation_errors[:5]:
+                report += f"- {error}\n"
+            report += "\n"
+        
+        if sources:
+            report += "## Sources\n\n"
+            for source in sources[:5]:
+                report += f"- {source.get('title', source.get('url', 'Unknown'))}\n"
+        
+        return report
     
     def _build_validation_prompt(
         self,

@@ -23,15 +23,22 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Only use ClerkProvider if Clerk keys are configured
+  const useClerk = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  
   return (
     <html
       lang="en"
       className={`${jakarta.variable} ${jetbrains.variable} h-full antialiased`}
     >
       <body className="h-full min-h-screen font-sans bg-background text-foreground">
-        <ClerkProvider>
-          {children}
-        </ClerkProvider>
+        {useClerk ? (
+          <ClerkProvider>
+            {children}
+          </ClerkProvider>
+        ) : (
+          children
+        )}
       </body>
     </html>
   );

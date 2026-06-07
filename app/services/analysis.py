@@ -25,6 +25,7 @@ from app.services.section_utils import (
     validate_section_references,
     calculate_coverage_metrics
 )
+from app.services.chunked_analysis import get_chunked_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,19 @@ async def run_pipeline(
     text: str,
     contract_type: str | None = None,
     user_type: str | None = None,
+    file_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Run the full audit pipeline using the LangGraph orchestration layer,
     yielding SSE events for each step.
+    
+    Args:
+        text: Document text to analyze
+        contract_type: Type of contract
+        user_type: User role
+        file_id: File ID for MCP tool access (optional)
+        conversation_id: Conversation ID for session tracking (optional)
     """
 
     # 1. Initialize steps for the frontend UI
@@ -47,13 +57,20 @@ async def run_pipeline(
     ]
     yield _sse({"event": "steps_init", "data": {"steps": steps}})
 
-    # 2. Setup initial state for LangGraph
+    # 2. Clean the contract text before anything touches it
+    # Sanitize OCR artifacts, garbage unicode, and repeated noise characters
+    from app.services.text_cleaner import clean_contract_text
+    cleaned_text = clean_contract_text(text)
+    logger.info(f"run_pipeline: text cleaned {len(text)} -> {len(cleaned_text)} chars")
+
+    # 3. Setup initial state for LangGraph
+    session_id = conversation_id or "default_session"
     initial_state: AgentState = {
         "query": f"Analyze this {contract_type or 'contract'} for a {user_type or 'user'}.",
         "original_query": f"Full audit of contract ({contract_type or 'unknown type'})",
         "internal_docs": [],
         "web_results": [],
-        "merged_context": text,
+        "merged_context": cleaned_text,  # ← cleaned contract text
         "sources": [],
         "research_report": "",
         "risk_analysis": {},
@@ -62,10 +79,24 @@ async def run_pipeline(
         "next_step": "",
         "errors": [],
         "iteration_count": 0,
-        "reflection_log": []
+        "reflection_log": [],
+        "file_id": file_id,  # NEW: For MCP tool access
+        "session_id": session_id,  # NEW: For audit trail
     }
 
-    # 3. Execute Graph with state updates
+    # 2.5. CHUNKED PROCESSING: Quick scan only (instant feedback)
+    parsed_doc = initial_state.get("parsed_document")
+    if parsed_doc:
+        try:
+            # Quick scan (< 1 second) - just show document structure
+            chunked_service = get_chunked_service(chunk_size=3)
+            quick_scan = await chunked_service.quick_scan(initial_state)
+            yield _sse({"event": "quick_scan", "data": quick_scan})
+            logger.info("Quick scan complete, starting full analysis...")
+        except Exception as e:
+            logger.warning(f"Quick scan failed: {e}")
+
+    # 3. Execute Graph with state updates (full deep analysis)
     try:
         # LangGraph can run nodes sequentially. We'll listen for state changes.
         # Note: In a production environment with complex streaming, you'd use a custom
@@ -163,6 +194,12 @@ async def run_pipeline(
                 elif node_name == "auditor":
                     report_md = state_update.get("final_report_md", "")
                     final_report = report_md
+                    
+                    # NEW: Include audit trail if available
+                    audit_trail = state_update.get("audit_trail", [])
+                    if audit_trail:
+                        logger.info(f"Audit trail: {len(audit_trail)} MCP tool calls")
+                    
                     yield _sse({"event": "content_chunk", "data": {"chunk": report_md, "step_id": "auditor"}})
 
         # Final completion for the last node
@@ -170,14 +207,28 @@ async def run_pipeline(
             yield _sse({"event": "step_update", "data": {"step_id": current_node, "status": "completed"}})
 
         # Send the final 'done' event with the full report
-        yield _sse({
-            "event": "done",
-            "data": {
-                "risk_analysis": final_risk_analysis,
-                "report": final_report,
-                "sources": final_sources,
-            },
-        })
+        done_data = {
+            "risk_analysis": final_risk_analysis,
+            "report": final_report,
+            "sources": final_sources,
+        }
+        
+        # NEW: Include MCP metrics if available
+        if file_id and session_id:
+            try:
+                from app.services.mcp_integration import get_integration_service
+                integration = get_integration_service()
+                audit_trail = integration.get_audit_trail(session_id)
+                if audit_trail["success"]:
+                    done_data["mcp_metrics"] = {
+                        "total_calls": audit_trail["total_calls"],
+                        "success_rate": audit_trail["success_rate"],
+                        "tool_usage": audit_trail["tool_usage"]
+                    }
+            except Exception as e:
+                logger.warning(f"Failed to get MCP metrics: {e}")
+        
+        yield _sse({"event": "done", "data": done_data})
 
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
