@@ -93,6 +93,9 @@ The system follows a 4-node "Chain of Thought" process orchestrated by **LangGra
 4.  📝 **Reporter Node**: Synthesizes the analysis into a professional, human-readable audit report via SSE.
 
 ---
+<img width="1216" height="1834" alt="image" src="https://github.com/user-attachments/assets/2b369ef1-8808-4f22-b178-4c304074de12" />
+<img width="1104" height="1830" alt="image" src="https://github.com/user-attachments/assets/78ba3258-a747-483f-9fed-2fbb1181d8cb" />
+
 
 ## 🛡 License
 Private / Proprietary — All rights reserved.
