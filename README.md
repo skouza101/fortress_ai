@@ -95,6 +95,7 @@ The system follows a 4-node "Chain of Thought" process orchestrated by **LangGra
 ---
 <img width="1216" height="1834" alt="image" src="https://github.com/user-attachments/assets/2b369ef1-8808-4f22-b178-4c304074de12" />
 <img width="1104" height="1830" alt="image" src="https://github.com/user-attachments/assets/78ba3258-a747-483f-9fed-2fbb1181d8cb" />
+<img width="896" height="1684" alt="image" src="https://github.com/user-attachments/assets/ed34e7ae-e4e6-45dc-a214-dd83ae69743b" />
 <img width="1184" height="1822" alt="image" src="https://github.com/user-attachments/assets/9347db91-945f-46eb-a630-b71bc5c08afa" />
 
 
